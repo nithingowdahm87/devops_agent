@@ -1,21 +1,20 @@
-import os
+# -*- coding: utf-8 -*-
 
-MAX_RETRIES = 3
-TIMEOUT_SECONDS = 120
+# LLM Constants
+MAX_LLM_RETRIES = 3
+MAX_HEAL_RETRIES = 3
 
-# Severity thresholds
-TRIVY_SEVERITY = ["CRITICAL", "HIGH"]
+# HTTP & API Constants
+HTTP_TIMEOUT_SECONDS = 15
+END_OF_LIFE_API_URL = "https://endoflife.date/api"
 
-# File detection mapping
-FILE_TYPE_MAP = {
-    "Dockerfile": "docker",
-    ".dockerignore": "dockerignore",
-    ".yml": "yaml",
-    ".yaml": "yaml"
-}
+# Compiler Settings
+STRICT_MODE = False
+DEFAULT_ENVIRONMENT = "dev"
 
-REPORT_DIR = "reports"
-GENERATED_DIR = "generated"
-
-os.makedirs(REPORT_DIR, exist_ok=True)
-os.makedirs(GENERATED_DIR, exist_ok=True)
+# Formatting
+JSON_SORT_KEYS = True
+YAML_INDENT = 2
+DOCKER_INSTRUCTION_ORDER = [
+    "FROM", "ARG", "ENV", "WORKDIR", "COPY", "RUN", "EXPOSE", "USER", "HEALTHCHECK", "ENTRYPOINT", "CMD"
+]

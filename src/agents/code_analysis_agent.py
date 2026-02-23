@@ -1,6 +1,9 @@
 import os
 import json
+import logging
 from typing import Any
+
+logger = logging.getLogger("devops-agent")
 from src.tools.file_ops import scan_directory, read_file, write_file
 from src.tools.context_gatherer import ContextGatherer
 from src.schemas import ProjectContext
@@ -40,6 +43,7 @@ class CodeAnalysisAgent:
         self._detect_env_vars(analysis)
         self._detect_existing_files(analysis)
         self._detect_architecture(analysis)
+        self._verify_db_detection(analysis)
         
         # 4. Create Pydantic model
         context = ProjectContext(**analysis)
@@ -421,6 +425,43 @@ class CodeAnalysisAgent:
         if "azure" in str(deps_all): arch.add("azure")
 
         analysis["architecture"] = list(arch)
+
+    def _verify_db_detection(self, analysis: dict):
+        """
+        Deep scan for database hints in SQL files, properties, and specific drivers.
+        """
+        db_hints = {
+            "rdbms": set(),
+            "cache": set(),
+            "nosql": set()
+        }
+        
+        # 1. Scan for config/sql files
+        for root, _, files in os.walk(self.project_path):
+            for file in files:
+                fpath = os.path.join(root, file)
+                content = ""
+                
+                # Check .sql files
+                if file.endswith(".sql"):
+                    content = read_file(fpath).lower()
+                    if "postgresql" in content or "pg_" in content: db_hints["rdbms"].add("PostgreSQL")
+                    if "mysql" in content: db_hints["rdbms"].add("MySQL")
+                
+                # Check application.properties / .env
+                if file in ["application.properties", ".env", "config.yaml", "config.yml"]:
+                    content = read_file(fpath).lower()
+                    if "jdbc:postgresql" in content: db_hints["rdbms"].add("PostgreSQL")
+                    if "jdbc:mysql" in content: db_hints["rdbms"].add("MySQL")
+                    if "redis_url" in content or "redis.host" in content: db_hints["cache"].add("Redis")
+                    if "mongodb_uri" in content: db_hints["nosql"].add("MongoDB")
+
+        # 2. Merge hints into existing analysis
+        for cat in ["rdbms", "cache", "nosql"]:
+            for db in db_hints[cat]:
+                if db not in analysis["databases"][cat]:
+                    analysis["databases"][cat][db] = ["detected_via_file_scan"]
+                    logger.info(f"🔍 Discovery: Found {db} via file content scan.")
 
     def _save_cache(self, context: ProjectContext):
         write_file(self.cache_file, context.model_dump_json(indent=2))

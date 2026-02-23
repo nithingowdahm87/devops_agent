@@ -35,12 +35,13 @@ from src.tools.file_ops import write_file
 logger = logging.getLogger("devops-agent")
 
 class V2Orchestrator:
-    def __init__(self):
+    def __init__(self, environment: str = "dev"):
         self.planner = ArchitecturePlanner()
         self.evaluator = Evaluator()
         self.repair_agent = RepairAgent()
         self.validator = Validator()
         self.healer = Healer()
+        self.environment = environment
         self.memory = None # Init later with project_path
         
         # Initialize Generators (Safe Layout)
@@ -63,7 +64,7 @@ class V2Orchestrator:
                 logger.warning(f"Failed to init {name} client: {e}. Using Mock.")
                 self.generators.append(LLMGenerator(MockClient(name=f"Mock-{name}"), f"Mock-{name}"))
         
-    def run_pipeline(self, project_path: str, context: ProjectContext):
+    def run_pipeline(self, project_path: str, context: ProjectContext, environment: str = "dev", no_llm: bool = False):
         """
         Main entry point for V2 Pipeline.
         """
@@ -180,17 +181,17 @@ class V2Orchestrator:
 
 
         # --- STAGE: Docker ---
-        self._execute_stage("Dockerfile", "dockerfile", project_path, context, plan)
+        self._execute_stage("Dockerfile", "dockerfile", project_path, context, plan, environment, no_llm)
 
         # --- STAGE: Docker Compose ---
-        self._execute_stage("Docker Compose", "docker_compose", project_path, context, plan)
+        self._execute_stage("Docker Compose", "docker_compose", project_path, context, plan, environment, no_llm)
         
         # --- STAGE: K8s ---
         # Only if applicable (e.g. not serverless, though we assume K8s for now)
-        self._execute_stage("Kubernetes Manifests", "kubernetes", project_path, context, plan)
+        self._execute_stage("Kubernetes Manifests", "kubernetes", project_path, context, plan, environment, no_llm)
         
         # --- STAGE: CI Pipeline ---
-        self._execute_stage("CI Pipeline", "cicd", project_path, context, plan)
+        self._execute_stage("CI Pipeline", "cicd", project_path, context, plan, environment, no_llm)
 
         print("\n🎉 Pipeline Execution Completed Successfully!")
         import os
@@ -203,7 +204,7 @@ class V2Orchestrator:
         sys.exit(0)
 
         
-    def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan):
+    def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan, environment: str = "dev", no_llm: bool = False):
         print(f"\n--- Stage: {display_name} ---")
         
         # 1. Load Prompts
@@ -268,14 +269,36 @@ class V2Orchestrator:
         prompt_context.update(context.model_dump())
         
         candidates = []
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = [executor.submit(g.generate, template, prompt_context) for g in self.generators]
-            for f in concurrent.futures.as_completed(futures):
-                try:
-                    candidates.append(f.result())
-                except Exception as e:
-                    logger.error(f"Generator failed: {e}")
+        if no_llm:
+            print(f"  [!] no-llm mode enabled. Skipping generation for {stage_key}.")
+            from src.engine.fallbacks import FALLBACK_DIR
+            fb_map = {
+                "dockerfile": "Dockerfile",
+                "docker_compose": "docker-compose.yml",
+                "kubernetes": "k8s-deployment.yaml",
+                "cicd": "gha-ci.yml"
+            }
+            fb_path = os.path.join(FALLBACK_DIR, fb_map.get(stage_key, "Dockerfile"))
+            from src.tools.file_ops import read_file
+            if os.path.exists(fb_path):
+                content = read_file(fb_path)
+                # Mock a candidate
+                from dataclasses import dataclass
+                @dataclass
+                class MockCandidate:
+                    file_content: str
+                    model_name: str = "Fallback-Template"
+                    reasoning: str = "Hardware-locked deterministic fallback"
+                candidates.append(MockCandidate(file_content=content))
+        else:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = [executor.submit(g.generate, template, prompt_context) for g in self.generators]
+                for f in concurrent.futures.as_completed(futures):
+                    try:
+                        candidates.append(f.result())
+                    except Exception as e:
+                        logger.error(f"Generator failed: {e}")
 
         # 3. Score & Select
         # We need to simulate scoring. Real scoring needs static analysis (hadolint, kubeconform).
@@ -356,7 +379,12 @@ class V2Orchestrator:
         best_spec, best_score = self.evaluator.evaluate_candidates(candidates)
         print(f"🏆 Selected Draft from {best_spec.model_name} (Score: {best_score:.1f})")
         
-        # 4. Deterministic Validation & Repair Loop
+        # 4. Level 10 Validation & Policy Engine
+        from src.engine.policy_engine import PolicyEngine
+        from src.models.domain import ProjectModel
+        # Basic model for policy
+        policy_model = ProjectModel(project_name=context.project_name, services=[], environment=environment)
+        policy_engine = PolicyEngine(policy_model)
         print(f"验证: {best_spec.model_name} draft...")
         
         final_content = best_spec.file_content
@@ -369,24 +397,32 @@ class V2Orchestrator:
             
             if matches:
                 processed_files = []
+                from src.engine.artifact_manager import ArtifactManager
+                from src.engine.severity import Severity
+                art_mgr = ArtifactManager(project_path, environment)
+                
                 for rel_path, f_content in matches:
                     gen_file = GeneratedFile(path=rel_path.strip(), content=f_content.strip())
                     val_res = self.validator.validate(gen_file)
                     
+                    # Policy Checks
+                    policy_findings = policy_engine.validate_artifact(rel_path, f_content)
+                    if policy_findings:
+                        val_res.passed = False
+                        val_res.errors.extend([f"POLICY: {msg}" for sev, msg in policy_findings])
+
                     if not val_res.passed:
                         print(f"  [!] Validation failed for {rel_path}. Healing...")
                         gen_file = self.healer.heal(gen_file, val_res.errors)
-                        # Re-validate once
+                        # Final re-validate
                         val_res = self.validator.validate(gen_file)
-                        if not val_res.passed:
-                            print(f"  ⚠️  Healer could not fix all issues in {rel_path}")
+                    
+                    # Level 10 Write Gate
+                    sev = Severity.HIGH if not val_res.passed else Severity.LOW
+                    art_mgr.write_gate(gen_file.path, gen_file.content, sev)
                     processed_files.append(gen_file)
-                
-                # Re-assemble or write directly
-                self._write_files_direct(processed_files, project_path)
             else:
                 # Single file or fallback
-                # Determine default filename
                 filename = "Dockerfile"
                 if stage_key == "docker_compose": filename = "docker-compose.yml"
                 elif stage_key == "kubernetes": filename = "k8s/deployment.yaml"
@@ -394,12 +430,22 @@ class V2Orchestrator:
 
                 gen_file = GeneratedFile(path=filename, content=final_content)
                 val_res = self.validator.validate(gen_file)
+                
+                # Policy Checks
+                policy_findings = policy_engine.validate_artifact(filename, final_content)
+                if policy_findings:
+                    val_res.passed = False
+                    val_res.errors.extend([f"POLICY: {msg}" for sev, msg in policy_findings])
+
                 if not val_res.passed:
                     gen_file = self.healer.heal(gen_file, val_res.errors)
-                    final_content = gen_file.content
                 
-                write_file(f"{project_path}/{filename}", final_content)
-                print(f"✅ Precomputed {filename}")
+                from src.engine.artifact_manager import ArtifactManager
+                from src.engine.severity import Severity
+                art_mgr = ArtifactManager(project_path, environment)
+                sev = Severity.HIGH if not val_res.passed else Severity.LOW
+                art_mgr.write_gate(gen_file.path, gen_file.content, sev)
+                print(f"✅ Processed {filename}")
         else:
             # Traditional single file write (e.g. cicd if not in multi-list above)
             filename = ".github/workflows/main.yml" if stage_key == "cicd" else "generated_file"

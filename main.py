@@ -1,5 +1,11 @@
+# -*- coding: utf-8 -*-
 import os
 import sys
+import io
+
+# Enforce UTF-8 for stdout and stderr
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 import json
 import time
 import logging
@@ -601,6 +607,18 @@ def run_manual_menu(project_path, context, audit, publisher, run_id):
 # MAIN WIZARD
 # ================================================================
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="DevOps AI Agent Pipeline v12.0")
+    parser.add_argument("--env", type=str, default="dev", help="Environment (dev, staging, prod)")
+    parser.add_argument("--strict", action="store_true", help="Enable strict policy mode")
+    parser.add_argument("--no-llm", action="store_true", help="Force deterministic fallback mode")
+    parser.add_argument("path", type=str, nargs="?", help="Project path")
+    args = parser.parse_args()
+
+    # Configure based on args
+    from src.engine import config
+    config.STRICT_MODE = args.strict
+    
     configure_logging(json_mode=os.environ.get("LOG_JSON", "").lower() == "true")
     run_id = set_correlation_id()
     audit = AuditLog(run_id=run_id)
@@ -609,13 +627,13 @@ def main():
     print_header(f"DevOps AI Agent Pipeline v12.0 [run:{run_id}]")
     logger.info("Pipeline started | gitops_mode=%s", publisher.mode, extra={"stage": "init"})
     
-    project_path = input("Enter project path: ").strip()
-    if not os.path.exists(project_path):
-        print("❌ Path does not exist")
+    project_path = args.path or input("Enter project path: ").strip()
+    if not project_path or not os.path.exists(project_path):
+        print(f"❌ Path does not exist: {project_path}")
         return
 
     # STEP 1: ANALYSIS
-    print_header("Stage 1: Code Analysis & Caching")
+    print_header(f"Stage 1: Code Analysis & Caching [{args.env.upper()} mode]")
     context = load_or_run_analysis(project_path)
     logger.info("Context loaded: %s app", context.language, extra={"stage": "Analysis"})
     print(f"✅ Context Loaded: {context.language} app, Ports: {context.ports}")
@@ -630,7 +648,7 @@ def main():
         
         if choice == '1':
             orchestrator = V2Orchestrator()
-            orchestrator.run_pipeline(project_path, context)
+            orchestrator.run_pipeline(project_path, context, environment=args.env, no_llm=args.no_llm)
         elif choice == '2':
             run_manual_menu(project_path, context, audit, publisher, run_id)
         elif choice == 'q':

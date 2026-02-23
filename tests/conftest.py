@@ -17,7 +17,7 @@ def mock_env(monkeypatch):
 @pytest.fixture
 def clean_env(monkeypatch):
     """Remove all API keys to test missing-key paths."""
-                 "GITHUB_TOKEN", "GITHUB_REPO"]:
+    for key in ["GOOGLE_API_KEY", "GROQ_API_KEY", "NVIDIA_API_KEY", "GITHUB_TOKEN", "GITHUB_REPO"]:
         monkeypatch.delenv(key, raising=False)
 
 
