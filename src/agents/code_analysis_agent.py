@@ -359,6 +359,13 @@ class CodeAnalysisAgent:
                         "role": "Microservice", "databases": [],
                     }
 
+                except Exception:
+                    microservice_details[rel_dir] = {
+                        "language": "Python", "frameworks": [], "ports": ["8000"],
+                        "base_image": "python:3.11-slim", "node_version": "3.11",
+                        "role": "Microservice", "databases": [],
+                    }
+
             # ── Python service ─────────────────────────────────────────
             elif "requirements.txt" in files and is_subdir:
                 microservice_dirs.append(rel_dir)
@@ -399,6 +406,53 @@ class CodeAnalysisAgent:
                         "base_image": "python:3.11-slim", "node_version": "3.11",
                         "role": "Microservice", "databases": [],
                     }
+
+            # ── Java/Spring Boot service ─────────────────────────────
+            elif "pom.xml" in files and is_subdir:
+                # Ensure it's a leaf service (contains src/main)
+                if os.path.isdir(os.path.join(root, "src", "main")):
+                    microservice_dirs.append(rel_dir)
+                    try:
+                        svc_ports = ["8080"]
+                        svc_dbs = []
+                        
+                        # Scan common resources for port/DB
+                        res_path = os.path.join(root, "src", "main", "resources")
+                        if os.path.isdir(res_path):
+                            for r_file in os.listdir(res_path):
+                                if r_file.endswith((".properties", ".yml", ".yaml")):
+                                    r_content = read_file(os.path.join(res_path, r_file))
+                                    # Extract port
+                                    p_match = re.search(r'(?:server\.port|port)\s*[:=]\s*(\d+)', r_content)
+                                    if p_match: svc_ports = [p_match.group(1)]
+                                    
+                                    # Extract DB hints
+                                    r_lower = r_content.lower()
+                                    if "jdbc:postgresql" in r_lower: svc_dbs.append("PostgreSQL")
+                                    if "jdbc:mysql" in r_lower: svc_dbs.append("MySQL")
+                                    if "redis" in r_lower: svc_dbs.append("Redis")
+                        
+                        # Infer role
+                        role = _infer_role(["Spring Boot"], [], [], os.path.basename(root))
+                        if "gateway" in rel_dir.lower(): role = "API Gateway"
+                        elif "auth" in rel_dir.lower(): role = "Authentication Service"
+                        
+                        microservice_details[rel_dir] = {
+                            "language": "Java",
+                            "frameworks": ["Spring Boot"],
+                            "node_version": "21", # Reusing field for Java version
+                            "base_image": "maven:3.9-eclipse-temurin-21 → eclipse-temurin:21-jre-alpine",
+                            "ports": svc_ports,
+                            "key_deps": ["spring-boot-starter-web"],
+                            "role": role,
+                            "databases": svc_dbs,
+                        }
+                    except Exception:
+                        microservice_details[rel_dir] = {
+                            "language": "Java", "frameworks": ["Spring Boot"], "ports": ["8080"],
+                            "base_image": "maven-openjdk", "node_version": "17",
+                            "role": "Spring Boot Service", "databases": []
+                        }
 
         if microservice_dirs:
             arch.add("microservices")

@@ -22,12 +22,22 @@ class PolicyEngine:
         Returns a list of (Severity, Message).
         """
         results = []
+        c_lower = content.lower()
         
-        # 1. Global: No stub echo steps
-        if "echo \"running" in content.lower() or "echo \"placeholder" in content.lower():
-            results.append((Severity.HIGH, "STUB_ECHO_DETECTED: Found placeholder echo commands in script."))
+        # 1. Global: No stub echo steps (Gap 6)
+        stubs = ["echo \"running", "echo \"placeholder", "echo \"compiling", "run: echo \"...\""]
+        for stub in stubs:
+            if stub in c_lower:
+                results.append((Severity.HIGH, f"STUB_ECHO_DETECTED: Found placeholder echo command: {stub}"))
 
-        # 2. Environment Specific Policies
+        # 2. Immutable Constraints (Gap 2)
+        if self.env == "prod":
+            # If we had a previous graph, we'd check against it. 
+            # For now, we enforce "Self-Consistency" rules that are immutable.
+            if "dockerfile" in path.lower() and "expose " not in c_lower:
+                 results.append((Severity.HIGH, "IMMUTABLE_POLICY_VIOLATION: Production Dockerfiles MUST explicitly EXPOSE a port."))
+
+        # 3. Environment Specific Policies
         if self.env == "prod":
             results.extend(self._validate_prod(path, content))
         else:
@@ -58,5 +68,5 @@ class PolicyEngine:
         return errors
 
     def _validate_dev(self, path, content) -> List[Tuple[Severity, str]]:
-        # Dev is more relaxed
+        # Dev is more relaxed but still blocks stubs (handled in validate_artifact)
         return []

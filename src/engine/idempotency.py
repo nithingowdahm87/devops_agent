@@ -12,10 +12,17 @@ class IdempotencyEngine:
     @staticmethod
     def stabilize_yaml(content: str) -> str:
         try:
-            data = yaml.safe_load(content)
-            if not data: return content
-            # Re-dump with sorted keys and standard indent
-            return yaml.safe_dump(data, default_flow_style=False, sort_keys=True, indent=2, allow_unicode=True)
+            # Multi-document support
+            docs = list(yaml.safe_load_all(content))
+            if not docs: return content
+            
+            stable_docs = []
+            for doc in docs:
+                if doc is None: continue
+                # Re-dump with sorted keys and standard indent
+                stable_docs.append(yaml.safe_dump(doc, default_flow_style=False, sort_keys=True, indent=2, allow_unicode=True))
+            
+            return "---\n".join(stable_docs)
         except:
             return content
 
@@ -29,20 +36,21 @@ class IdempotencyEngine:
 
     @staticmethod
     def stabilize_dockerfile(content: str) -> str:
-        """
-        Sorts instructions by predefined semantic order (FROM, ENV, COPY, etc.)
-        """
-        from src.engine.config import DOCKER_INSTRUCTION_ORDER
         lines = content.splitlines()
-        # This is complex to do perfectly without breaking logic.
-        # Minimal: Ensure no extra whitespace and consistent case.
         cleaned = []
         for line in lines:
-            if line.strip():
-                # Normalize case for instruction keywords
-                parts = line.split(maxsplit=1)
-                if len(parts) > 1 and parts[0].upper() in DOCKER_INSTRUCTION_ORDER:
-                    cleaned.append(f"{parts[0].upper()} {parts[1]}")
+            line = line.strip()
+            if not line: continue
+            
+            # Normalize instruction case
+            parts = line.split(maxsplit=1)
+            if len(parts) > 0:
+                keyword = parts[0].upper()
+                if keyword in ["FROM", "RUN", "CMD", "LABEL", "EXPOSE", "ENV", "ADD", "COPY", "ENTRYPOINT", "VOLUME", "USER", "WORKDIR", "ARG", "ONBUILD", "STOPSIGNAL", "HEALTHCHECK", "SHELL"]:
+                    if len(parts) > 1:
+                        cleaned.append(f"{keyword} {parts[1]}")
+                    else:
+                        cleaned.append(keyword)
                 else:
                     cleaned.append(line)
         return "\n".join(cleaned)

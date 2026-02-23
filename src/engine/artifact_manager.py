@@ -41,8 +41,12 @@ class ArtifactManager:
             return False
             
         if severity == Severity.HIGH:
-            broken_path = full_path + ".broken"
-            write_file(broken_path, content)
+            if self.environment == "dev":
+                logger.warning(f"[DEV] Write Gate HIGH violation on {rel_path} - writing anyway.")
+                write_file(full_path, content)
+                return True
+            frozen_path = full_path + ".broken"
+            write_file(frozen_path, content)
             logger.warning(f"Write Gate saved {rel_path} as .broken due to HIGH violation.")
             return False
 

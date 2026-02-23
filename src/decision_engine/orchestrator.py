@@ -180,18 +180,38 @@ class V2Orchestrator:
         # self._execute_stage("Scan & Observability", "scan", project_path, context, plan)
 
 
-        # --- STAGE: Docker ---
-        self._execute_stage("Dockerfile", "dockerfile", project_path, context, plan, environment, no_llm)
+        # 6. Run Stages (Level 10 Deterministic Sequence)
+        all_artifacts = {}
+        for stage in ["dockerfile", "docker_compose", "kubernetes", "cicd"]:
+             res_files = self._execute_stage(stage.replace("_", " "), stage, project_path, context, plan, environment=environment, no_llm=no_llm)
+             if res_files:
+                 for f in res_files:
+                     all_artifacts[f.path] = f.content
 
-        # --- STAGE: Docker Compose ---
-        self._execute_stage("Docker Compose", "docker_compose", project_path, context, plan, environment, no_llm)
+        # 7. Level 10 Post-Generation Stage (Audit & Manifest)
+        print("\n--- Stage 5: Global Integrity Audit ---")
+        from src.engine.integrity import IntegrityAuditor
+        from src.engine.graph import ArchitectureGraph
+        # Construct graph for audit
+        graph = ArchitectureGraph()
+        for svc_dir in context.microservice_dirs:
+             p = context.microservice_details.get(svc_dir, {}).get("ports", ["8080"])[0]
+             graph.add_node(svc_dir, p)
         
-        # --- STAGE: K8s ---
-        # Only if applicable (e.g. not serverless, though we assume K8s for now)
-        self._execute_stage("Kubernetes Manifests", "kubernetes", project_path, context, plan, environment, no_llm)
+        auditor = IntegrityAuditor(graph)
+        for path, content in all_artifacts.items():
+            auditor.add_artifact(path, content)
         
-        # --- STAGE: CI Pipeline ---
-        self._execute_stage("CI Pipeline", "cicd", project_path, context, plan, environment, no_llm)
+        findings = auditor.run_audit()
+        if findings:
+            print("🔍 Audit Findings:")
+            for sev, msg in findings:
+                print(f"  [{sev.name}] {msg}")
+        else:
+            print("✅ Integrity Audit Passed.")
+
+        from src.engine.secrets_manifest import SecretsManifest
+        SecretsManifest.generate(project_path, all_artifacts)
 
         print("\n🎉 Pipeline Execution Completed Successfully!")
         import os
@@ -267,6 +287,19 @@ class V2Orchestrator:
         }
         # Add specific fields
         prompt_context.update(context.model_dump())
+        
+        # --- Level 10 Deterministic Looping (Gap 4) ---
+        if stage_key == "dockerfile" and context.microservice_dirs:
+            dirs_str = "\n".join([f"- {d}" for d in context.microservice_dirs])
+            template += f"\n\nCRITICAL: Generate a separate Dockerfile for EACH of these {len(context.microservice_dirs)} services:\n{dirs_str}\nUse FILENAME: <dir>/Dockerfile for each."
+        
+        if stage_key == "docker_compose" and context.microservice_dirs:
+            svc_str = "\n".join([f"- {d} (port {context.microservice_details.get(d, {}).get('ports', ['8080'])[0]})" for d in context.microservice_dirs])
+            template += f"\n\nCRITICAL: Generate docker-compose.yml listing ALL {len(context.microservice_dirs)} services:\n{svc_str}\nInclude postgres and redis if referenced. Use FILENAME: docker-compose.yml"
+
+        if stage_key == "kubernetes" and context.microservice_dirs:
+            svc_str = ", ".join(context.microservice_dirs)
+            template += f"\n\nCRITICAL: Generate K8s manifests for ALL services: {svc_str}.\nInclude Namespace, Service, Deployment, HPA, NetworkPolicy as separate files. Use FILENAME: k8s/<svc>/<file>.yaml format."
         
         candidates = []
         if no_llm:
@@ -390,7 +423,7 @@ class V2Orchestrator:
         final_content = best_spec.file_content
         
         # Determine if we need to split multifile
-        if stage_key in ["dockerfile", "kubernetes", "docker_compose"]:
+        if stage_key in ["dockerfile", "kubernetes", "docker_compose", "cicd"]:
             import re
             pattern = r"FILENAME: (.*?)\n```(?:\w+)?\n(.*?)```"
             matches = re.findall(pattern, final_content, re.DOTALL)
@@ -417,17 +450,20 @@ class V2Orchestrator:
                         # Final re-validate
                         val_res = self.validator.validate(gen_file)
                     
+                    # Level 10 Idempotency (Gap 3)
+                    from src.engine.idempotency import IdempotencyEngine
+                    gen_file.content = IdempotencyEngine.stabilize(gen_file.path, gen_file.content)
+
                     # Level 10 Write Gate
                     sev = Severity.HIGH if not val_res.passed else Severity.LOW
                     art_mgr.write_gate(gen_file.path, gen_file.content, sev)
                     processed_files.append(gen_file)
+                return processed_files
             else:
-                # Single file or fallback
-                filename = "Dockerfile"
-                if stage_key == "docker_compose": filename = "docker-compose.yml"
-                elif stage_key == "kubernetes": filename = "k8s/deployment.yaml"
-                elif stage_key == "cicd": filename = ".github/workflows/main.yml"
-
+                # Legacy fallback single file
+                filename = "generated_file"
+                if stage_key == "cicd": filename = ".github/workflows/main.yml"
+                
                 gen_file = GeneratedFile(path=filename, content=final_content)
                 val_res = self.validator.validate(gen_file)
                 
@@ -440,25 +476,20 @@ class V2Orchestrator:
                 if not val_res.passed:
                     gen_file = self.healer.heal(gen_file, val_res.errors)
                 
+                # Level 10 Idempotency (Gap 3)
+                from src.engine.idempotency import IdempotencyEngine
+                gen_file.content = IdempotencyEngine.stabilize(gen_file.path, gen_file.content)
+
                 from src.engine.artifact_manager import ArtifactManager
                 from src.engine.severity import Severity
                 art_mgr = ArtifactManager(project_path, environment)
                 sev = Severity.HIGH if not val_res.passed else Severity.LOW
                 art_mgr.write_gate(gen_file.path, gen_file.content, sev)
                 print(f"✅ Processed {filename}")
+                return [gen_file]
         else:
-            # Traditional single file write (e.g. cicd if not in multi-list above)
-            filename = ".github/workflows/main.yml" if stage_key == "cicd" else "generated_file"
-            
-            gen_file = GeneratedFile(path=filename, content=final_content)
-            val_res = self.validator.validate(gen_file)
-            if not val_res.passed:
-                 print(f"  [!] Stage {stage_key} failed validation. Healing...")
-                 gen_file = self.healer.heal(gen_file, val_res.errors)
-                 final_content = gen_file.content
-            
-            write_file(f"{project_path}/{filename}", final_content)
-            print(f"✅ Precomputed {filename}")
+            # Legacy fallback single file (e.g. cicd if not in multi-list above)
+            return []
         
         # 8. Save to Memory
         self.memory.store_decision(

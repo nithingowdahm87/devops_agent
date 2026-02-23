@@ -17,14 +17,27 @@ class SecretsManifest:
         """
         secrets = set()
         
-        # Scan CI artifacts
+        # Scan artifacts
         for path, content in artifacts.items():
+            import re
+            # GHA
             if ".github/workflows" in path:
-                import re
                 matches = re.findall(r'\${{\s*secrets\.([A-Z_][A-Z0-9_]*)\s*}}', content)
                 secrets.update(matches)
-                
+            # Compose
+            if "docker-compose" in path:
+                matches = re.findall(r'\${([A-Z_][A-Z0-9_]*)}', content)
+                secrets.update([m for m in matches if "PASSWORD" in m or "SECRET" in m or "TOKEN" in m or "KEY" in m])
+            # K8s
+            if "k8s/" in path:
+                # Look for name: in Secret objects
+                if "kind: Secret" in content:
+                    names = re.findall(r'name:\s*([a-z0-9](?:[-a-z0-9]*[a-z0-9])?)', content)
+                    for n in names: 
+                        if "secret" in n or "cred" in n: secrets.add(n.upper().replace("-", "_"))
+
         if not secrets:
+            logger.info("No secrets detected for manifest.")
             return
             
         logger.info(f"🔑 Found {len(secrets)} secrets. Generating manifest...")
