@@ -18,9 +18,14 @@ class GeminiClient:
         if hasattr(resp, "content"):
             content = resp.content
             if isinstance(content, list):
-                # Sometimes Google generative models return a list of text dicts
                 try:
-                    return "\n".join([c.get("text", str(c)) if isinstance(c, dict) else str(c) for c in content])
+                    parts = []
+                    for c in content:
+                        if isinstance(c, dict):
+                            parts.append(c.get("text", str(c)))
+                        else:
+                            parts.append(str(c))
+                    return "\n".join(parts)
                 except Exception:
                     return str(content)
             return str(content)

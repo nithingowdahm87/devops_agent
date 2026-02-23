@@ -37,211 +37,164 @@ description = "Global allowlist"
 ```
 """
 
-        if "github actions" in prompt_lower or "ci" in prompt_lower:
+        # SPECIFIC STAGES FIRST
+        if "docker-compose" in prompt_lower or "docker compose" in prompt_lower:
             return """
-name: CI — DevSecOps Pipeline
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-permissions:
-  contents: read
-  security-events: write
-
-env:
-  IMAGE_TAG: ${{ github.sha }}
-
-jobs:
-  # STAGE 1: COMPILE
-  compile:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Syntax Check (Frontend)
-        run: cd frontend && npm install && node --check src/*.jsx
-      - name: Syntax Check (Backend)
-        run: cd backend && npm install && node --check index.js
-
-  # STAGE 2: SECRET SCAN
-  gitleaks-scan:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: gitleaks/gitleaks-action@v2
-        env: { GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
-
-  # STAGE 3: FILESYSTEM SCAN
-  trivy-fs-scan:
-    runs-on: ubuntu-latest
-    needs: gitleaks-scan
-    steps:
-      - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          exit-code: '0'
-
-  # STAGE 4: SONARQUBE (Parallel)
-  sonar-frontend:
-    runs-on: ubuntu-latest
-    needs: trivy-fs-scan
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: SonarSource/sonarqube-github-action@master
-        with: { projectBaseDir: frontend }
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN_FRONTEND }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-
-  sonar-backend:
-    runs-on: ubuntu-latest
-    needs: trivy-fs-scan
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: SonarSource/sonarqube-github-action@master
-        with: { projectBaseDir: backend }
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN_BACKEND }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-
-  # STAGE 5: DOCKER BUILD (Parallel)
-  docker-frontend:
-    runs-on: ubuntu-latest
-    needs: sonar-frontend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: ./frontend
-          push: true
-          tags: ${{ vars.DOCKERHUB_USERNAME }}/frontend:${{ env.IMAGE_TAG }}
-
-  docker-backend:
-    runs-on: ubuntu-latest
-    needs: sonar-backend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: ./backend
-          push: true
-          tags: ${{ vars.DOCKERHUB_USERNAME }}/backend:${{ env.IMAGE_TAG }}
-
-  # STAGE 6: IMAGE SCAN
-  trivy-image-frontend:
-    runs-on: ubuntu-latest
-    needs: docker-frontend
-    steps:
-      - uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ vars.DOCKERHUB_USERNAME }}/frontend:${{ env.IMAGE_TAG }}
-
-  trivy-image-backend:
-    runs-on: ubuntu-latest
-    needs: docker-backend
-    steps:
-      - uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ vars.DOCKERHUB_USERNAME }}/backend:${{ env.IMAGE_TAG }}
-
-  # STAGE 7: DAST
-  owasp-zap:
-    runs-on: ubuntu-latest
-    needs: [trivy-image-frontend, trivy-image-backend]
-    steps:
-      - uses: zaproxy/action-baseline@v0.12.0
-        with:
-          target: ${{ secrets.APP_STAGING_URL }}
-
-  # STAGE 8: NOTIFY
-  notify:
-    runs-on: ubuntu-latest
-    if: always()
-    needs: owasp-zap
-    steps:
-      - uses: 8398a7/action-slack@v3
-        with:
-          status: custom
-          fields: repo,message,commit,author,action,eventName,ref,workflow,job,took
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-"""
-
-        if "docker-compose" in prompt_lower:
-            return """
+FILENAME: docker-compose.yml
+```yaml
 version: '3.8'
 services:
-  app:
-    build: .
+  backend:
+    build: 
+      context: ./backend
     ports:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-  mongo:
-    image: mongo:latest
+    depends_on:
+      db:
+        condition: service_healthy
+  frontend:
+    build:
+      context: ./frontend
     ports:
-      - "27017:27017"
+      - "5173:5173"
+    depends_on:
+      - backend
+  db:
+    image: postgres:15-alpine
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+```
 """
+
+        if "github actions" in prompt_lower or "ci" in prompt_lower:
+            # Check if it was really asking for docker-compose instead
+            if "docker-compose" not in prompt_lower:
+                return """
+FILENAME: .github/workflows/main.yml
+```yaml
+name: CI
+on:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: echo "Mock build"
+```
+"""
+
         # "dockerfile" or "docker" but NOT "compose"
         if "dockerfile" in prompt_lower or ("docker" in prompt_lower and "build" in prompt_lower):
-            return """
-FROM node:18-alpine
+            # Check if it should be multi-file
+            if "backend" in prompt_lower and "frontend" in prompt_lower:
+                return """
+FILENAME: backend/Dockerfile
+```dockerfile
+# Build stage
+FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 COPY . .
+
+# Run stage
+FROM node:20-alpine
+WORKDIR /app
+RUN adduser -D appuser && chown -R appuser:appuser /app
+USER appuser
+COPY --from=builder --chown=appuser:appuser /app .
+ENV NODE_ENV=production
+HEALTHCHECK --interval=30s --timeout=5s CMD node -e "process.exit(0)"
+CMD ["node", "index.js"]
+```
+
+FILENAME: backend/.dockerignore
+```
+node_modules
+.git
+.env
+```
+
+FILENAME: frontend/Dockerfile
+```dockerfile
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+
+FROM node:20-alpine
+WORKDIR /app
+RUN adduser -D appuser && chown -R appuser:appuser /app
+USER appuser
+COPY --from=builder --chown=appuser:appuser /app .
+EXPOSE 5173
+HEALTHCHECK --interval=30s --timeout=5s CMD node -e "process.exit(0)"
+CMD ["npm", "run", "dev"]
+```
+"""
+            return """
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+
+FROM node:20-alpine
+WORKDIR /app
+RUN adduser -D appuser && chown -R appuser:appuser /app
+USER appuser
+COPY --from=builder --chown=appuser:appuser /app .
 EXPOSE 3000
-CMD ["npm", "start"]
+HEALTHCHECK --interval=30s --timeout=5s CMD node -e "process.exit(0)"
+CMD ["node", "index.js"]
 """
         if "kubernetes" in prompt_lower and "review" not in prompt_lower:
             return """
+FILENAME: k8s/deployment.yaml
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: myapp
+  name: backend
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: myapp
+      app: backend
   template:
     metadata:
       labels:
-        app: myapp
+        app: backend
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
       containers:
-      - name: myapp
-        image: myapp:latest
+      - name: backend
+        image: backend:1.0.0
         ports:
         - containerPort: 3000
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: myapp
-spec:
-  selector:
-    app: myapp
-  ports:
-    - port: 80
-      targetPort: 3000
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+```
 """
         if "helm" in prompt_lower or "observability" in prompt_lower:
             return """

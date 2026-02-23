@@ -1,0 +1,6 @@
+{
+  "artifactType": "ARTIFACT_TYPE_WALKTHROUGH",
+  "summary": "Final walkthrough of the fixes and the successful validation run on `sample_app`. Summarizes the core engine stabilization, Nginx support, and robust multi-file handling.",
+  "updatedAt": "2026-02-23T18:43:44.009035948Z",
+  "version": "3"
+}

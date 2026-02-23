@@ -9,12 +9,16 @@ from src.engine.constitution import critique_file
 from src.engine.heal import Healer
 from src.engine.validate import Validator
 from src.engine.innovation import run_innovation_async
-from src.llm_clients.groq_client import GroqClient
+from src.llm_clients.nvidia_client import NvidiaClient
+from src.llm_clients.openrouter_client import OpenRouterClient
+from src.llm_clients.cerebras_client import CerebrasClient
 
 class Orchestrator:
     def __init__(self):
-        self.llm = GroqClient()
-        self.sampler = Sampler(self.llm)
+        # Using NVIDIA Llama 405B for extreme high-quality reasoning
+        self.reasoner = NvidiaClient()
+        self.llm = NvidiaClient()
+        self.sampler = Sampler(self.llm) 
         self.validator = Validator()
         self.healer = Healer()
 
@@ -22,6 +26,7 @@ class Orchestrator:
         # Load the elite prompt
         prompt_map = {
             "docker": "configs/prompts/docker/docker_production.md",
+            "compose": "configs/prompts/docker/docker_compose.md",
             "k8s": "configs/prompts/k8s/k8s_production.md",
             "ci": "configs/prompts/cicd/cicd_production.md"
         }
@@ -34,15 +39,11 @@ class Orchestrator:
             return ""
 
     def run_pipeline(self, user_request: str, artifact_type: str, build_context: dict, project_path: str) -> list[GeneratedFile]:
-        print(f"\n{'='*60}\n🚀 SOVEREIGN PIPELINE: {artifact_type.upper()}\n{'='*60}")
-        
         # --- LAYER 0: Research & Spec ---
         spec_notes, research_notes = run_research(user_request, artifact_type)
-        print(f"  [+] Layer 0 Complete: Spec and Research locked.")
 
         # --- LAYER 1: RAG Injection ---
         rag_context = get_rag_context(user_request, artifact_type)
-        print(f"  [+] Layer 1 Complete: RAG Golden Paths injected.")
 
         # Assemble the ultimate prompt
         base_prompt = self._get_generator_prompt(artifact_type)
@@ -123,13 +124,9 @@ LAYER 1 (RAG GOLDEN PATHS & CIS BENCHMARKS):
             # Write to disk
             self._write_to_disk(final_artifacts[-1])
             
-            # --- LAYER 6: Innovation Flywheel (Async) ---
-            print(f"  [>] Layer 6: Triggering Async Innovation Flywheel...")
-            threading.Thread(
-                target=run_innovation_async,
-                args=(final_artifacts[-1].content, artifact_type, user_request),
-                daemon=True
-            ).start()
+            # --- LAYER 6: Innovation Flywheel ---
+            print(f"  [>] Layer 6: Running Innovation Flywheel...")
+            run_innovation_async(final_artifacts[-1].content, artifact_type, user_request)
             
         print(f"\n✅ Finished {artifact_type}: Successfully processed {len(final_artifacts)} files.")
         return final_artifacts

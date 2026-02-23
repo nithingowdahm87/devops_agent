@@ -13,6 +13,7 @@ class ArchitecturePlan:
     requires_cache: bool        # Redis/Memcached?
     requires_queue: bool        # RabbitMQ/SQS?
     requires_database: bool     # Postgres/MySQL/Mongo?
+    requires_reverse_proxy: bool # Nginx/HAProxy?
     deployment_strategy: str    # rolling | recreate | blue-green
     observability_level: str    # basic | standard | strict
     

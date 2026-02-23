@@ -32,8 +32,16 @@ class _SafeDict(dict):
 def render_prompt(template: str, context: dict) -> str:
     """
     Render prompt template with application context.
-    Unknown keys (e.g. {APP_VERSION} in Dockerfile code examples) are left intact
-    and passed through as-is to the LLM — only known template keys like {context}
-    and {plan_summary} are substituted.
+    Uses simple replacement to avoid issues with code blocks containing {}
     """
-    return template.format_map(_SafeDict(context))
+    result = template
+    # We only care about these primary keys in the orchestrator V2
+    keys_to_replace = ["context", "plan_summary", "project_name"]
+    
+    for key in keys_to_replace:
+        placeholder = "{" + key + "}"
+        if placeholder in result:
+            val = str(context.get(key, ""))
+            result = result.replace(placeholder, val)
+            
+    return result

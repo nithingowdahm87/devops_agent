@@ -1,9 +1,9 @@
 from src.engine.models import GeneratedFile
-from src.llm_clients.groq_client import GroqClient
+from src.llm_clients.nvidia_client import NvidiaClient
 
 class Healer:
     def __init__(self):
-        self.llm = GroqClient()
+        self.llm = NvidiaClient()
         self.prompt = self._load_prompt("configs/prompts/debug/healer.md")
         
     def _load_prompt(self, filepath: str) -> str:

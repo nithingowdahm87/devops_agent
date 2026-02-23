@@ -2,7 +2,7 @@ import concurrent.futures
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 class Sampler:
-    def __init__(self, llm_client, temperatures=[0.2, 0.4, 0.6]):
+    def __init__(self, llm_client, temperatures=[0.2, 1.0]):
         self.llm = llm_client
         self.temperatures = temperatures
 
@@ -25,11 +25,9 @@ class Sampler:
 
     def sample(self, prompt: str) -> list[str]:
         candidates = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.temperatures)) as executor:
-            futures = {executor.submit(self._generate_candidate, prompt, t): t for t in self.temperatures}
-            for future in concurrent.futures.as_completed(futures):
-                res = future.result()
-                if res.strip():
-                    candidates.append(res)
+        for t in self.temperatures:
+            res = self._generate_candidate(prompt, t)
+            if res.strip():
+                candidates.append(res)
                     
         return candidates

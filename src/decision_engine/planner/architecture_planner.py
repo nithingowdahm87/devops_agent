@@ -29,6 +29,7 @@ class ArchitecturePlanner:
             requires_cache=has_cache,
             requires_queue=(service_type == "worker"),
             requires_database=has_db,
+            requires_reverse_proxy=public_exposure, # Default Nginx for public exposure
             deployment_strategy=deployment,
             observability_level="standard",
             detected_framework=context.frameworks[0] if context.frameworks else "unknown",

@@ -164,3 +164,7 @@ xxhash==3.6.0
     #   langsmith
 zstandard==0.25.0
     # via langsmith
+python-dotenv==1.2.1
+chromadb==0.4.24
+posthog<3.0.0
+numpy<2.0.0

@@ -20,9 +20,14 @@ from src.memory.long_term_memory import LongTermMemory
 
 # Clients
 from src.llm_clients.gemini_client import GeminiClient
-from src.llm_clients.groq_client import GroqClient
 from src.llm_clients.nvidia_client import NvidiaClient
+from src.llm_clients.groq_client import GroqClient
 from src.llm_clients.mock_client import MockClient
+
+# Engine
+from src.engine.validate import Validator
+from src.engine.heal import Healer
+from src.engine.models import GeneratedFile
 
 # Tools
 from src.tools.file_ops import write_file
@@ -34,6 +39,8 @@ class V2Orchestrator:
         self.planner = ArchitecturePlanner()
         self.evaluator = Evaluator()
         self.repair_agent = RepairAgent()
+        self.validator = Validator()
+        self.healer = Healer()
         self.memory = None # Init later with project_path
         
         # Initialize Generators (Safe Layout)
@@ -206,7 +213,7 @@ class V2Orchestrator:
             "kubernetes": ("k8s", "k8s_production"),
             "cicd": ("cicd", "cicd_production"),
             "scan": ("debug", "healer"), # Simplified
-            "docker_compose": ("docker", "docker_production") # Use production docker prompt
+            "docker_compose": ("docker", "docker_compose")
         }
         
         prompt_dir, prompt_name = prompt_map.get(stage_key, (stage_key, "writer_a"))
@@ -280,17 +287,51 @@ class V2Orchestrator:
         # For now, we will assign mock scores to test the flow.
         for c in candidates:
             content = c.file_content.lower()
-            # --- Security heuristics (0-100) ---
-            sec = 60  # base
-            if "user " in content and ("adduser" in content or "useradd" in content or "nonroot" in content):
-                sec += 15  # non-root user present
-            if ":latest" not in content:
-                sec += 10  # no latest tags
-            if "no-cache" in content or "--no-cache-dir" in content or "rm -rf /var/lib" in content:
-                sec += 10  # cache cleaned in layer
-            if "copy .env" not in content and "env password" not in content:
-                sec += 5   # no secrets in image
-            c.security_score = min(100, sec)
+            # --- Security & Quality heuristics (0-100) ---
+            score = 50  # base
+            
+            # Docker specific
+            if stage_key == "dockerfile":
+                if "from " in content and " as " in content:
+                    score += 15  # multi-stage build reward
+                if "user " in content and ("adduser" in content or "useradd" in content or "appuser" in content):
+                    score += 15  # non-root user
+                if "healthcheck" in content:
+                    score += 10  # healthcheck presence
+                if "npm ci" in content or "pip install --no-cache-dir" in content:
+                    score += 5   # optimized installs
+                if ":latest" not in content:
+                    score += 5   # pinned versions
+            
+            # Kubernetes specific
+            elif stage_key == "kubernetes":
+                if "resources:" in content and "limits:" in content:
+                    score += 20  # resource limits
+                if "runasnonroot: true" in content or "runasuser:" in content:
+                    score += 15  # security context
+                if "readinessprobe:" in content or "livenessprobe:" in content:
+                    score += 10  # probes
+                if "networkpolicy" in content.lower():
+                    score += 5   # network policy presence
+            
+            # CI/CD specific
+            elif stage_key == "cicd":
+                if "trivy" in content or "gitleaks" in content or "sonar" in content:
+                    score += 20  # integrated security scans
+                if "permissions:" in content:
+                    score += 10  # explicit permissions
+                if "needs:" in content:
+                    score += 5   # job dependencies
+            
+            # Penalties
+            if "privileged: true" in content:
+                score -= 30
+            if "copy . env" in content or "env_file:" in content:
+                # Potential secret exposure (rough check)
+                score -= 10
+
+            c.security_score = min(100, max(0, score))
+            c.compliance_score = c.security_score # Tie them for now
 
             # --- Best-practice heuristics (0-100) ---
             bp = 60  # base
@@ -315,66 +356,81 @@ class V2Orchestrator:
         best_spec, best_score = self.evaluator.evaluate_candidates(candidates)
         print(f"🏆 Selected Draft from {best_spec.model_name} (Score: {best_score:.1f})")
         
-        # 4. Repair Loop
-        # Validator? We need specific validators for each stage.
-        # For now, pass.
+        # 4. Deterministic Validation & Repair Loop
+        print(f"验证: {best_spec.model_name} draft...")
+        
         final_content = best_spec.file_content
         
-        # 5. Confidence & Decision
-        confidence_val = compute_confidence(best_spec, repair_attempts=0, model_agreement_score=model_agreement)
-        decision = decide_action(confidence_val)
-        
-        print(f"🤖 Confidence: {confidence_val:.1f}% -> Action: {decision.action.upper()}")
-        print(f"   Reason: {decision.reason}")
-        
-        # 6. User Gate (if required)
-        if decision.requires_human_gate:
-            print("\n" + "="*50)
-            print("📝  GENERATED DRAFTS PREVIEW")
-            print("="*50)
-            for idx, c in enumerate(candidates):
-                print(f"\n--- Draft {idx+1} ({c.model_name}) ---")
-                print(c.file_content)
-            print("\n" + "="*50)
-            print("🏆  FINAL SELECTED DRAFT")
-            print("="*50)
-            print(final_content)
-            print("="*50 + "\n")
+        # Determine if we need to split multifile
+        if stage_key in ["dockerfile", "kubernetes", "docker_compose"]:
+            import re
+            pattern = r"FILENAME: (.*?)\n```(?:\w+)?\n(.*?)```"
+            matches = re.findall(pattern, final_content, re.DOTALL)
             
-            user_input = input(f"Proceed with {display_name}? [y/n/edit]: ").lower()
-            if user_input != 'y':
-                print("Skipping write.")
-                return
-        
-        # 7. Write Output
-        # Determine filename based on stage
-        filename = "Dockerfile"
-        if stage_key == "dockerfile" or stage_key == "kubernetes":
-            self._handle_multifile_output(final_content, project_path)
-            return
-        if stage_key == "docker_compose": filename = "docker-compose.yml"
-        if stage_key == "cicd": filename = ".github/workflows/main.yml"
-        if stage_key == "scan": 
-            # Scan stage writes multiple files in executor/generator. 
-            # We might need to skip this single write_file or handle it.
-            # But wait, orchestrator calls write_file at the end.
-            # The Generator returns 'InfraSpec'. file_content is the content.
-            # For scan, file_content is likely multi-file block.
-            # We should let the executor handle it, OR simple-parse it here.
-            # Let's assume we skip single-file write for 'scan' and handle multi-file.
-            self._handle_multifile_output(final_content, project_path)
-            return
-        
-        write_file(f"{project_path}/{filename}", final_content)
-        print(f"✅ Precomputed {filename}")
+            if matches:
+                processed_files = []
+                for rel_path, f_content in matches:
+                    gen_file = GeneratedFile(path=rel_path.strip(), content=f_content.strip())
+                    val_res = self.validator.validate(gen_file)
+                    
+                    if not val_res.passed:
+                        print(f"  [!] Validation failed for {rel_path}. Healing...")
+                        gen_file = self.healer.heal(gen_file, val_res.errors)
+                        # Re-validate once
+                        val_res = self.validator.validate(gen_file)
+                        if not val_res.passed:
+                            print(f"  ⚠️  Healer could not fix all issues in {rel_path}")
+                    processed_files.append(gen_file)
+                
+                # Re-assemble or write directly
+                self._write_files_direct(processed_files, project_path)
+            else:
+                # Single file or fallback
+                # Determine default filename
+                filename = "Dockerfile"
+                if stage_key == "docker_compose": filename = "docker-compose.yml"
+                elif stage_key == "kubernetes": filename = "k8s/deployment.yaml"
+                elif stage_key == "cicd": filename = ".github/workflows/main.yml"
+
+                gen_file = GeneratedFile(path=filename, content=final_content)
+                val_res = self.validator.validate(gen_file)
+                if not val_res.passed:
+                    gen_file = self.healer.heal(gen_file, val_res.errors)
+                    final_content = gen_file.content
+                
+                write_file(f"{project_path}/{filename}", final_content)
+                print(f"✅ Precomputed {filename}")
+        else:
+            # Traditional single file write (e.g. cicd if not in multi-list above)
+            filename = ".github/workflows/main.yml" if stage_key == "cicd" else "generated_file"
+            
+            gen_file = GeneratedFile(path=filename, content=final_content)
+            val_res = self.validator.validate(gen_file)
+            if not val_res.passed:
+                 print(f"  [!] Stage {stage_key} failed validation. Healing...")
+                 gen_file = self.healer.heal(gen_file, val_res.errors)
+                 final_content = gen_file.content
+            
+            write_file(f"{project_path}/{filename}", final_content)
+            print(f"✅ Precomputed {filename}")
         
         # 8. Save to Memory
         self.memory.store_decision(
             stage=stage_key,
             content=final_content,
-            reason=decision.reason,
+            reason=best_spec.reasoning,
             decision="APPROVED"
         )
+
+    def _write_files_direct(self, files: list[GeneratedFile], project_path: str):
+        import os
+        print("📦 Writing Validated Config Files:")
+        for f in files:
+            full_path = os.path.join(project_path, f.path)
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            with open(full_path, "w") as out:
+                out.write(f.content)
+            print(f"  - Created {f.path}")
 
     def _handle_multifile_output(self, content: str, project_path: str):
         """Helper to parse FILENAME: blocks and write them."""

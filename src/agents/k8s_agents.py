@@ -1,6 +1,6 @@
 from src.llm_clients.gemini_client import GeminiClient
-from src.llm_clients.groq_client import GroqClient
 from src.llm_clients.nvidia_client import NvidiaClient
+from src.llm_clients.groq_client import GroqClient
 from src.tools.file_ops import read_file, write_file
 from src.utils.constants import GUIDELINES_K8S
 
@@ -22,7 +22,6 @@ class K8sWriterA:
 class K8sWriterB:
     def __init__(self):
         self.llm = GroqClient()
-        
     def generate(self, context: str) -> str:
         try:
             system = read_file("configs/prompts/system_master.md")
@@ -51,12 +50,9 @@ class K8sWriterC:
 
 class K8sReviewer:
     def __init__(self):
-        from src.llm_clients.perplexity_client import PerplexityClient
-        self.llm = PerplexityClient()
-    
+        self.llm = GeminiClient()
     def review_and_merge(self, yaml_a: str, yaml_b: str, yaml_c: str, validation_report: str = "") -> tuple[str, str]:
         """
-        Uses Perplexity AI to intelligently review all 3 K8s manifests.
         """
         # Load guidelines
         try:

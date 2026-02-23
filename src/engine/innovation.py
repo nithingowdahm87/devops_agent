@@ -1,17 +1,17 @@
 import concurrent.futures
-from src.llm_clients.groq_client import GroqClient
+from src.llm_clients.cerebras_client import CerebrasClient
 from src.engine.rag import save_to_rag
 
 class InnovationFlywheel:
     def __init__(self):
-        # We will use Groq to simulate the multi-LLM personas if others are unavailable
-        self.groq = GroqClient()
+        # Using Cerebras for ultra-fast async advisory
+        self.llm = CerebrasClient()
 
     def _ask_advisory(self, persona: str, prompt: str) -> str:
         try:
             print(f"  [>] Innovation Layer ({persona}): Analyzing...")
-            self.groq.temperature = 0.5
-            response = self.groq.call(prompt)
+            self.llm.temperature = 0.5
+            response = self.llm.call(prompt)
             return response
         except Exception as e:
             print(f"  [!] Innovation Layer failed for {persona}: {e}")
@@ -28,17 +28,10 @@ class InnovationFlywheel:
         ]
         
         suggestions = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            future_to_persona = {
-                executor.submit(self._ask_advisory, persona, p): persona 
-                for persona, p in prompts
-            }
-            
-            for future in concurrent.futures.as_completed(future_to_persona):
-                persona = future_to_persona[future]
-                res = future.result()
-                if res.strip():
-                    suggestions.append(f"[{persona} Advisory]:\n{res}")
+        for persona, p in prompts:
+            res = self._ask_advisory(persona, p)
+            if res.strip():
+                suggestions.append(f"[{persona} Advisory]:\n{res}")
 
         if suggestions:
             combined = "\n\n".join(suggestions)
@@ -47,6 +40,6 @@ class InnovationFlywheel:
             print(f"  [+] Saved {len(suggestions)} innovation advisories to RAG.")
 
 def run_innovation_async(artifact_content: str, artifact_type: str, original_prompt: str):
-    # This function itself can be called in a background thread by the orchestrator
+    # This function itself is called in a background thread by the orchestrator
     flywheel = InnovationFlywheel()
     flywheel.run_async(artifact_content, artifact_type, original_prompt)

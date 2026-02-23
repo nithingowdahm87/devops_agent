@@ -1,11 +1,11 @@
 import os
 import json
-from src.llm_clients.perplexity_client import PerplexityClient
 from src.tools.file_ops import read_file, write_file
+from src.llm_clients.gemini_client import GeminiClient
 
 class GuidelinesComplianceAgent:
     def __init__(self):
-        self.llm = PerplexityClient()
+        self.llm = GeminiClient()
 
     def analyze_and_update(self, reasoning: str, guidelines_path: str) -> dict:
         """

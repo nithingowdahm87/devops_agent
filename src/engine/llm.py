@@ -1,13 +1,14 @@
 import os
 import re
-from src.llm_clients.groq_client import GroqClient
+from src.llm_clients.nvidia_client import NvidiaClient
 from src.engine.models import GeneratedFile
 from src.engine.sampler import Sampler
 from src.engine.constitution import Constitution
 
 class LLMGenerator:
     def __init__(self):
-        self.llm = GroqClient()
+        # Using NVIDIA Llama 405B for high-quality generation
+        self.llm = NvidiaClient()
         self.sampler = Sampler(self.llm)
         self.constitution = Constitution(self.llm)
         self.system_prompt = self._load_prompt("configs/prompts/system/system_core.md")
@@ -61,24 +62,56 @@ class LLMGenerator:
 
     def _parse_files(self, response: str) -> list[GeneratedFile]:
         files = []
-        # Match FILENAME: filepath\n```ext\ncontent``` or FILENAME: filepath\ncontent
-        pattern = r"FILENAME:\s*(.*?)\n(?:```[\w]*\n)?(.*?)(?:```|$)"
-        matches = re.finditer(pattern, response, re.DOTALL)
+        # Strong pattern: ### FILENAME: path\n```ext\ncontent``` 
+        # Added support for optional extensions and more flexible headers
+        pattern = r"(?:###\s*)?FILENAME:\s*([^\s\n]+).*\n(?:```[\w]*\n)?(.*?)(?:```|$)"
+        matches = re.finditer(pattern, response, re.DOTALL | re.IGNORECASE)
         
         for match in matches:
             path = match.group(1).strip()
             content = match.group(2).strip()
-            # Clean trailing backticks from content if present
+            
+            # Clean trailing backticks and markdown artifacts
             if content.endswith('```'):
                  content = content[:-3].strip()
-            files.append(GeneratedFile(path=path, content=content))
+            
+            # Normalize path (remove leading/trailing slashes, cleanup)
+            path = path.replace('\\', '/').strip('/')
+            
+            if path and content:
+                files.append(GeneratedFile(path=path, content=content))
         
-        # Fallback if the strict FILENAME format wasn't produced perfectly
+        # Fallback 1: Look for "File: path" or "Path: path"
         if not files:
-            # Try splitting by markdown blocks if there's only one block
-            blocks = re.findall(r"```.*?\n(.*?)```", response, re.DOTALL)
-            if blocks:
-                 files.append(GeneratedFile(path="generated_file", content=blocks[0].strip()))
+            pattern_alt = r"(?:(?:File|Path|Target):\s*)([^\s\n]+).*\n(?:```[\w]*\n)(.*?)(?:```|$)"
+            matches_alt = re.finditer(pattern_alt, response, re.DOTALL | re.IGNORECASE)
+            for match in matches_alt:
+                path = match.group(1).strip().strip('/')
+                content = match.group(2).strip()
+                if content.endswith('```'): content = content[:-3].strip()
+                files.append(GeneratedFile(path=path, content=content))
+        
+        # Fallback 2: Heuristic path detection (lines starting with / or word/word)
+        if not files:
+            # If there's a code block and a short line right before it that looks like a path
+            pattern_heuristic = r"([a-zA-Z0-9._\-/]+\.[a-zA-Z0-9]+)\n(?:```[\w]*\n)(.*?)(?:```|$)"
+            matches_h = re.finditer(pattern_heuristic, response, re.DOTALL)
+            for match in matches_h:
+                path = match.group(1).strip()
+                content = match.group(2).strip()
+                if content.endswith('```'): content = content[:-3].strip()
+                files.append(GeneratedFile(path=path, content=content))
+
+        # Absolute Fallback: Split by markdown blocks but TRY to grep for filename INSIDE the block or just before
+        if not files:
+            blocks = re.findall(r"```(.*?)\n(.*?)```", response, re.DOTALL)
+            for i, (info, block) in enumerate(blocks):
+                # Check if 'info' (the lang tag) actually contains a filename hint
+                if '.' in info and '/' not in info: # e.g. ```dockerfile:backend/Dockerfile
+                    filename = info.split(':')[-1].strip()
+                else:
+                    filename = "generated_file" if i == 0 else f"generated_file_{i}"
+                files.append(GeneratedFile(path=filename, content=block.strip()))
                  
         return files
 

@@ -31,9 +31,8 @@ class RAGStore:
         )
         print(f"  [+] Added knowledge to RAG store for {artifact_type} ({source})")
 
-    def retrieve(self, query: str, artifact_type: str, k: int = 5) -> str:
+    def retrieve(self, query: str, artifact_type: str, k: int = 1) -> str:
         """Retrieves top-k relevant knowledge chunks."""
-        print(f"  [>] Retrieving context from RAG for {artifact_type}...")
         
         # Optional: we can filter by artifact type, but for now we just do a text query
         results = self.collection.query(
@@ -54,8 +53,6 @@ class RAGStore:
         count = self.collection.count()
         if count > 0:
             return  # Already seeded
-            
-        print("  [INIT] Seeding RAG store with initial Golden Paths...")
         
         # Docker Golden Path
         self.add_knowledge("docker", 

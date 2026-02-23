@@ -194,7 +194,6 @@ def run_docker_stage(project_path, context: ProjectContext, audit, publisher=Non
         wa, wb, wc = MockWriter(), MockWriter(), MockWriter()
         class MockDockerReviewer:
             def review_and_merge(self, a, b, c, validation_report=""):
-                resp = MockClient("PerplexityMock").call("review")
                 if "DOCKERFILE:" in resp:
                     parts = resp.split("DOCKERFILE:")
                     return (parts[1].strip(), parts[0].replace("REASONING:", "").strip())
@@ -248,7 +247,6 @@ def run_compose_stage(project_path, context: ProjectContext, audit, publisher=No
         ]
         class MockReviewer:
             def review_and_merge(self, a, b, c, validation_report=""):
-                resp = MockClient("PerplexityMock").call("docker-compose review")
                 return (resp, "Mock Compose reasoning.")
         reviewer = MockReviewer()
     executor = DockerComposeExecutor()
@@ -292,7 +290,6 @@ def run_k8s_stage(project_path, context: ProjectContext, audit, publisher=None, 
         wa, wb, wc = MockK8sWriter(), MockK8sWriter(), MockK8sWriter()
         class MockK8sReviewer:
             def review_and_merge(self, a, b, c, validation_report=""):
-                resp = MockClient("PerplexityMock").call("review kubernetes manifest")
                 if "YAML:" in resp:
                     parts = resp.split("YAML:")
                     return (parts[1].replace("```yaml", "").replace("```", "").strip(), parts[0].replace("REASONING:", "").strip())

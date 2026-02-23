@@ -57,10 +57,23 @@ FILE CONTENT TO REVIEW:
         
         # Clean response (prompt says raw text, but let's be safe against markdown bleed)
         cleaned_content = response.strip()
-        if cleaned_content.startswith("```"):
-            lines = cleaned_content.splitlines()
-            if len(lines) > 2:
-                cleaned_content = "\n".join(lines[1:-1])
+        
+        # Remove any leading prose before a code block
+        if "```" in cleaned_content:
+            # Extract first code block or the main block
+            match = re.search(r"```(?:[\w]*)\n(.*?)\n```", cleaned_content, re.DOTALL)
+            if match:
+                cleaned_content = match.group(1).strip()
+            else:
+                # If no perfect block, just strip the first and last line of a block if it starts with ```
+                lines = cleaned_content.splitlines()
+                if lines[0].startswith("```"):
+                    cleaned_content = "\n".join(lines[1:-1]).strip()
+        
+        # Strip common explanatory sections if they still leaked out
+        for noise in ["Explanation:", "Note:", "Review Result:", "Rules for your output:", "Corporate Standards:"]:
+            if noise in cleaned_content:
+                cleaned_content = cleaned_content.split(noise)[0].strip()
                 
         return GeneratedFile(path=file.path, content=cleaned_content)
 

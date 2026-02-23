@@ -1,6 +1,6 @@
 from src.llm_clients.gemini_client import GeminiClient
-from src.llm_clients.groq_client import GroqClient
 from src.llm_clients.nvidia_client import NvidiaClient
+from src.llm_clients.groq_client import GroqClient
 from src.tools.file_ops import read_file, write_file
 import os
 
@@ -44,7 +44,6 @@ class DebugWriterB:
     """Security-focused debugger."""
     def __init__(self):
         self.llm = GroqClient()
-
     def analyze(self, error_input: str, context: str = "") -> str:
         prompt = f"""
 You are a Security Engineer analyzing a production incident.
@@ -109,9 +108,7 @@ FIX:
 class DebugReviewer:
     """Synthesizes all 3 analyses into a unified incident report."""
     def __init__(self):
-        from src.llm_clients.perplexity_client import PerplexityClient
-        self.llm = PerplexityClient()
-
+        self.llm = GeminiClient()
     def review_and_merge(self, analysis_a: str, analysis_b: str, analysis_c: str, validation_report: str = "") -> tuple[str, str]:
         feedback_section = ""
         if validation_report:

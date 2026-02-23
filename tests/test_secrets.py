@@ -15,10 +15,7 @@ class TestGetSecretFromEnv:
         from src.utils.secrets import get_secret
         assert get_secret("GOOGLE_API_KEY") == "my-test-key"
 
-    def test_alias_perplexity_maps_to_pplx(self, monkeypatch):
-        monkeypatch.setenv("PPLX_API_KEY", "pplx-secret")
         from src.utils.secrets import get_secret
-        assert get_secret("PERPLEXITY_API_KEY") == "pplx-secret"
 
     def test_unknown_key_falls_back_to_env_name(self, monkeypatch):
         monkeypatch.setenv("CUSTOM_KEY", "custom-val")

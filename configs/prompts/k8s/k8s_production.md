@@ -18,6 +18,7 @@ Follow Pod Security Standard: restricted.
 
 Generate Istio VirtualService + Gateway ONLY if context confirms service mesh.
 Otherwise generate standard Ingress.
+If public exposure is required, also generate an **Nginx** sidecar or proxy deployment if requested by context, including its **ConfigMap** for `nginx.conf`.
 
 ---
 

@@ -12,13 +12,11 @@ def mock_env(monkeypatch):
     monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
     monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
     monkeypatch.setenv("NVIDIA_API_KEY", "test-nvidia-key")
-    monkeypatch.setenv("PPLX_API_KEY", "test-pplx-key")
 
 
 @pytest.fixture
 def clean_env(monkeypatch):
     """Remove all API keys to test missing-key paths."""
-    for key in ["GOOGLE_API_KEY", "GROQ_API_KEY", "NVIDIA_API_KEY", "PPLX_API_KEY",
                  "GITHUB_TOKEN", "GITHUB_REPO"]:
         monkeypatch.delenv(key, raising=False)
 

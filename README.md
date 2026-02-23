@@ -21,6 +21,14 @@ The engine follows this precise flow for every run:
 
 ---
 
+## ✨ Integrated Modern Features
+
+- **Microservices Awareness**: Automatically detects multi-service architectures (Express, React, Vite) and generates isolated Dockerfiles with shared networking.
+- **Reverse Proxy Support**: Native Nginx logic for `docker-compose` and Kubernetes `ConfigMaps`, ensuring your services are production-ready with a consistent entry point.
+- **Heuristic Validation Loop**: Uses `hadolint` and `kubeconform` to verify every artifact before it touches your disk.
+
+---
+
 ## 🚀 Quick Start / Installation
 
 This setup is designed to be easily portable. If you clone this repository to a new machine, follow these steps:

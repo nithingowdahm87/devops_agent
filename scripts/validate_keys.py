@@ -3,18 +3,11 @@
 import os
 import sys
 
-def test_perplexity():
-    """Test Perplexity API key."""
-    print("\n=== Testing Perplexity API ===")
     try:
-        from src.llm_clients.perplexity_client import PerplexityClient
-        client = PerplexityClient()
         response = client.call("Say 'Hello' in one word.")
-        print(f"✅ Perplexity API works!")
         print(f"Response: {response[:100]}...")
         return True
     except Exception as e:
-        print(f"❌ Perplexity API failed: {e}")
         return False
 
 def test_google_ai():
@@ -47,12 +40,10 @@ def test_github_models():
 
 if __name__ == "__main__":
     print("Starting API key validation...")
-    print(f"PPLX_API_KEY: {'SET' if os.getenv('PPLX_API_KEY') else 'NOT SET'}")
     print(f"GOOGLE_API_KEY: {'SET' if os.getenv('GOOGLE_API_KEY') else 'NOT SET'}")
     print(f"GITHUB_TOKEN: {'SET' if os.getenv('GITHUB_TOKEN') else 'NOT SET'}")
     
     results = {
-        "Perplexity": test_perplexity(),
         "Google AI": test_google_ai(),
         "GitHub Models": test_github_models()
     }

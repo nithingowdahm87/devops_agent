@@ -1,10 +1,9 @@
-from src.llm_clients.perplexity_client import PerplexityClient
 from src.tools.file_ops import read_file
+from src.llm_clients.gemini_client import GeminiClient
 
 class PromptImprover:
     def __init__(self):
-        self.llm = PerplexityClient()
-        
+        self.llm = GeminiClient()
     def improve(self, original: str, domain: str) -> str:
         guidelines_path = f"configs/guidelines/{domain}-guidelines.md"
         try:

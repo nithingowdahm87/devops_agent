@@ -1,0 +1,10 @@
+# Task: Analyze and Fix DevOps Agent Issues
+
+- [ ] Analyze `devops_agent` directory for unused files and folders [/]
+- [ ] Investigate `capture()` telemetry error [/]
+- [ ] Analyze DevOps artifact generation issues
+    - [ ] Check prompt configurations in `configs/prompts/`
+    - [ ] Check orchestrator logic in `src/engine/orchestrator.py`
+    - [ ] Check validator logic and why it's failing
+- [ ] Propose fixes and removals
+- [ ] Implement and verify fixes

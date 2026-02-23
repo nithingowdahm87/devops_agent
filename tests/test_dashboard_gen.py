@@ -37,7 +37,6 @@ def test_writer_b_dashboard_prompt():
 
 def test_reviewer_detects_dashboard():
     # Patch where it is defined since it is imported locally inside __init__
-    with patch("src.llm_clients.perplexity_client.PerplexityClient") as MockClient:
         mock_llm = MockClient.return_value
         mock_llm.call.return_value = "REASONING: Good.\nCONTENT:\n```json\n{\n \"title\": \"Dashboard\"\n}\n```"
         

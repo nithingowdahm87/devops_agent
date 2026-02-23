@@ -1,6 +1,6 @@
 from src.llm_clients.gemini_client import GeminiClient
-from src.llm_clients.groq_client import GroqClient
 from src.llm_clients.nvidia_client import NvidiaClient
+from src.llm_clients.groq_client import GroqClient
 from src.tools.file_ops import read_file, write_file
 import os
 
@@ -37,7 +37,6 @@ class ObservabilityWriterA:
 class ObservabilityWriterB:
     def __init__(self):
         self.llm = GroqClient()
-        
     def generate(self, context: str) -> str:
         prompt = f"""
         You are a SecOps Engineer.
@@ -100,9 +99,7 @@ class ObservabilityWriterC:
 
 class ObservabilityReviewer:
     def __init__(self):
-        from src.llm_clients.perplexity_client import PerplexityClient
-        self.llm = PerplexityClient()
-    
+        self.llm = GeminiClient()
     def review_and_merge(self, a: str, b: str, c: str, validation_report: str = "") -> tuple[str, str]:
         # Simple heuristic: if input looks like JSON, assume Dashboard review.
         is_dashboard = a.strip().startswith("{") or b.strip().startswith("{")

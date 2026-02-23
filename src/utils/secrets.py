@@ -20,11 +20,11 @@ logger = logging.getLogger("devops-agent.secrets")
 # ─── Key name mapping ───────────────────────────────────────────────
 # Maps friendly names to env var names and secret store paths
 _KEY_MAP = {
-    "GOOGLE_API_KEY":    {"env": "GOOGLE_API_KEY",    "aws_field": "google_api_key"},
     "GROQ_API_KEY":      {"env": "GROQ_API_KEY",      "aws_field": "groq_api_key"},
     "NVIDIA_API_KEY":    {"env": "NVIDIA_API_KEY",     "aws_field": "nvidia_api_key"},
-    "PPLX_API_KEY":      {"env": "PPLX_API_KEY",       "aws_field": "pplx_api_key"},
-    "PERPLEXITY_API_KEY":{"env": "PPLX_API_KEY",       "aws_field": "pplx_api_key"},
+    "CEREBRAS_API_KEY":  {"env": "CEREBRAS_API_KEY",   "aws_field": "cerebras_api_key"},
+    "OPENROUTER_API_KEY":{"env": "OPENROUTER_API_KEY", "aws_field": "openrouter_api_key"},
+    "HUGGINGFACE_TOKEN": {"env": "HUGGINGFACE_TOKEN",  "aws_field": "huggingface_token"},
 }
 
 # AWS Secrets Manager secret name (single secret holding all keys)

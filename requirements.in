@@ -8,7 +8,6 @@ langchain
 langgraph
 langchain-google-genai
 
-# HTTP (Groq/NVIDIA/Perplexity API calls)
 requests
 
 # YAML parsing

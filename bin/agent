@@ -1,0 +1,18 @@
+#!/bin/bash
+# DevOps Agent Executable Wrapper
+# Automatically sources environment and executes the pipeline
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$SCRIPT_DIR"
+
+if [ -f "venv/bin/activate" ]; then
+    source venv/bin/activate
+else
+    echo "⚠️  Virtual environment 'venv' not found."
+fi
+
+if [ -f ".env" ]; then
+    source .env
+fi
+
+python3 agent.py "$@"

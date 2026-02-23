@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Navigate to the script's directory (devops-agent root)
+# Navigate to the script's directory (devops_agent root)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "$SCRIPT_DIR"
 
@@ -20,4 +20,4 @@ fi
 
 # Run the Agent
 # Updated to use the new v15.0 Sovereign Engine (agent.py)
-python3 agent.py "$@"
+python3 main.py "$@"

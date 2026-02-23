@@ -32,20 +32,14 @@ class GeminiClient:
         return resp.content if hasattr(resp, "content") else str(resp)
 EOF
 
-# 2. Fix Perplexity Client
-cat > src/llm_clients/perplexity_client.py <<'EOF'
 import os
 import requests
 
-class PerplexityClient:
     def __init__(self, model: str = "sonar", temperature: float = 0.1):
-        token = os.environ.get("PPLX_API_KEY")
         if not token:
-            raise RuntimeError("PPLX_API_KEY environment variable is not set")
         self.token = token
         self.model = model
         self.temperature = temperature
-        self.base_url = "https://api.perplexity.ai/chat/completions"
 
     def call(self, prompt: str) -> str:
         headers = {
@@ -275,12 +269,10 @@ EOF
 
 # 8. Fix Prompt Improvement Agent
 cat > src/agents/prompt_improvement_agent.py <<'EOF'
-from src.llm_clients.perplexity_client import PerplexityClient
 from src.tools.file_ops import read_file
 
 class PromptImprover:
     def __init__(self):
-        self.llm = PerplexityClient()
         
     def improve(self, original: str, domain: str) -> str:
         guidelines_path = f"configs/guidelines/{domain}-guidelines.md"
@@ -372,7 +364,6 @@ def main() -> None:
         print("\nChoose action:")
         print("1) Docker flow (2 writers + reviewer + executor)")
         print("2) K8s flow (2 writers + reviewer + executor)")
-        print("3) Improve a prompt (Perplexity)")
         print("4) Exit")
         choice = input("Enter choice: ").strip()
         

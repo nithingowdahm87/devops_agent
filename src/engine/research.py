@@ -1,10 +1,10 @@
-from src.llm_clients.groq_client import GroqClient
+from src.llm_clients.nvidia_client import NvidiaClient
 
 class Researcher:
     def __init__(self):
-        # We can use the same GroqClient for both, or switch to Gemini if configured
-        self.planner_llm = GroqClient()
-        self.research_llm = GroqClient()
+        # Using NVIDIA for elite 405B research
+        self.planner_llm = NvidiaClient()
+        self.research_llm = NvidiaClient()
         
     def generate_spec(self, user_request: str, artifact_type: str) -> str:
         prompt = f"""
@@ -16,12 +16,11 @@ Focus on:
 - What it must avoid.
 - Security constraints that apply.
 
-Do not write the actual configuration file yet. Write the specification (spec.md).
+Do not write the actual configuration file yet. Write the specification (spec.md). Be extremely concise (max 150 words).
 
 USER REQUEST:
 {user_request}
 """
-        print(f"  [>] Layer 0 (Planner): Generating strict specification...")
         self.planner_llm.temperature = 0.2
         return self.planner_llm.call(prompt)
 
@@ -30,13 +29,12 @@ USER REQUEST:
 You are a DevOps Researcher specializing in 2026 industry standards.
 What are the latest best practices, security hardening patterns, and modern API usage recommendations for building a {artifact_type} for this specific request?
 
-Provide concise actionable bullet points (research_notes.md).
+Provide concise actionable bullet points (research_notes.md). Be extremely concise (max 150 words).
 Do not generate the actual file. 
 
 USER REQUEST:
 {user_request}
 """
-        print(f"  [>] Layer 0 (Research): Gathering 2026 best practices...")
         self.research_llm.temperature = 0.5
         return self.research_llm.call(prompt)
 
