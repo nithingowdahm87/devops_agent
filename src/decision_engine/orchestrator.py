@@ -193,10 +193,12 @@ class V2Orchestrator:
         from src.engine.integrity import IntegrityAuditor
         from src.engine.graph import ArchitectureGraph
         # Construct graph for audit
-        graph = ArchitectureGraph()
+
+        # FIX: ArchitectureGraph now accepts no-arg constructor
+        graph = ArchitectureGraph()           # ← was ArchitectureGraph() which crashed
         for svc_dir in context.microservice_dirs:
-             p = context.microservice_details.get(svc_dir, {}).get("ports", ["8080"])[0]
-             graph.add_node(svc_dir, p)
+            p = context.microservice_details.get(svc_dir, {}).get("ports", ["8080"])[0]
+            graph.add_node(svc_dir, p)        # ← use the new incremental builder
         
         auditor = IntegrityAuditor(graph)
         for path, content in all_artifacts.items():
@@ -299,7 +301,14 @@ class V2Orchestrator:
 
         if stage_key == "kubernetes" and context.microservice_dirs:
             svc_str = ", ".join(context.microservice_dirs)
-            template += f"\n\nCRITICAL: Generate K8s manifests for ALL services: {svc_str}.\nInclude Namespace, Service, Deployment, HPA, NetworkPolicy as separate files. Use FILENAME: k8s/<svc>/<file>.yaml format."
+            template += (
+                f"\n\nCRITICAL: Generate K8s manifests for ALL services: {svc_str}.\n"
+                "Include Namespace, Service, Deployment, HPA, PodDisruptionBudget, "
+                "and NetworkPolicy as separate files.\n"
+                "For HPA use apiVersion: autoscaling/v2 with spec.scaleTargetRef.name "
+                "matching the Deployment name. DO NOT put 'selector' in spec root of HPA.\n"
+                "Use FILENAME: k8s/<svc>/<file>.yaml format."
+            )
         
         candidates = []
         if no_llm:
@@ -435,7 +444,14 @@ class V2Orchestrator:
                 art_mgr = ArtifactManager(project_path, environment)
                 
                 for rel_path, f_content in matches:
-                    gen_file = GeneratedFile(path=rel_path.strip(), content=f_content.strip())
+                    rel_path = rel_path.strip()
+                    # ← BUG FIX: guard against LLM embedding YAML in filename token
+                    if len(rel_path) > 255 or "\n" in rel_path:
+                        logger.warning(
+                            f"Skipping malformed FILENAME token ({len(rel_path)} chars)"
+                        )
+                        continue
+                    gen_file = GeneratedFile(path=rel_path, content=f_content.strip())
                     val_res = self.validator.validate(gen_file)
                     
                     # Policy Checks
@@ -460,9 +476,14 @@ class V2Orchestrator:
                     processed_files.append(gen_file)
                 return processed_files
             else:
-                # Legacy fallback single file
-                filename = "generated_file"
-                if stage_key == "cicd": filename = ".github/workflows/main.yml"
+                # BUG FIX: fix the cicd/k8s fallback filenames
+                filename_map = {
+                    "cicd":          ".github/workflows/ci.yml",
+                    "docker_compose":"docker-compose.yml",
+                    "dockerfile":    "generated_file",
+                    "kubernetes":    "k8s/manifests.yaml",
+                }
+                filename = filename_map.get(stage_key, "generated_file")
                 
                 gen_file = GeneratedFile(path=filename, content=final_content)
                 val_res = self.validator.validate(gen_file)
