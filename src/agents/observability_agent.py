@@ -1,12 +1,10 @@
-from src.llm_clients.gemini_client import GeminiClient
-from src.llm_clients.nvidia_client import NvidiaClient
-from src.llm_clients.groq_client import GroqClient
 from src.tools.file_ops import read_file, write_file
+from src.engine.llm import call_llm
 import os
 
 class ObservabilityWriterA:
     def __init__(self):
-        self.llm = GeminiClient()
+        pass
         
     def generate(self, context: str) -> str:
         prompt = f"""
@@ -23,7 +21,7 @@ class ObservabilityWriterA:
         
         Return ONLY the YAML content for Chart.yaml.
         """.strip()
-        return self.llm.call(prompt)
+        return call_llm("", prompt, task_type="observability")
 
     def generate_dashboard(self, context: str) -> str:
         try:
@@ -32,11 +30,11 @@ class ObservabilityWriterA:
             task = "Generate a Grafana Dashboard JSON."
             
         prompt = f"{task}\n\nCONTEXT:\n{context}\n\nGenerate DASHBOARD JSON."
-        return self.llm.call(prompt)
+        return call_llm("", prompt, task_type="observability")
 
 class ObservabilityWriterB:
     def __init__(self):
-        self.llm = GroqClient()
+        pass
     def generate(self, context: str) -> str:
         prompt = f"""
         You are a SecOps Engineer.
@@ -51,7 +49,7 @@ class ObservabilityWriterB:
         
         Return ONLY the YAML content for Chart.yaml.
         """.strip()
-        return self.llm.call(prompt)
+        return call_llm("", prompt, task_type="observability")
 
     def generate_dashboard(self, context: str) -> str:
         try:
@@ -60,11 +58,11 @@ class ObservabilityWriterB:
             task = "Generate a Grafana Dashboard JSON."
             
         prompt = f"{task}\n\nCONTEXT:\n{context}\n\nGenerate DASHBOARD JSON."
-        return self.llm.call(prompt)
+        return call_llm("", prompt, task_type="observability")
 
 class ObservabilityWriterC:
     def __init__(self):
-        self.llm = NvidiaClient()
+        pass
         
     def generate(self, context: str) -> str:
         prompt = f"""
@@ -80,7 +78,7 @@ class ObservabilityWriterC:
         
         Return ONLY the YAML content for Chart.yaml.
         """.strip()
-        return self.llm.call(prompt)
+        return call_llm("", prompt, task_type="observability")
 
     def generate_dashboard(self, context: str = "") -> str:
         prompt = f"""
@@ -94,12 +92,12 @@ class ObservabilityWriterC:
         
         Return ONLY valid JSON.
         """.strip()
-        resp = self.llm.call(prompt)
+        resp = call_llm("", prompt, task_type="observability")
         return resp.replace("```json", "").replace("```", "").strip()
 
 class ObservabilityReviewer:
     def __init__(self):
-        self.llm = GeminiClient()
+        pass
     def review_and_merge(self, a: str, b: str, c: str, validation_report: str = "") -> tuple[str, str]:
         # Simple heuristic: if input looks like JSON, assume Dashboard review.
         is_dashboard = a.strip().startswith("{") or b.strip().startswith("{")
@@ -116,13 +114,13 @@ class ObservabilityReviewer:
         You are a Lead SRE Architect. Review 3 {item_type}s.
         
         Draft A:
-        {a[:4000]}...
+        {a}
         
         Draft B:
-        {b[:4000]}...
+        {b}
         
         Draft C:
-        {c[:4000]}...
+        {c}
         {feedback_section}
         TASK:
         1. Synthesize the BEST {item_type}.
@@ -141,7 +139,7 @@ class ObservabilityReviewer:
         {'}' if is_dashboard else '```'}
         """.strip()
         
-        response = self.llm.call(prompt)
+        response = call_llm("", prompt, task_type="observability")
         try:
             if "CONTENT:" in response:
                 parts = response.split("CONTENT:")

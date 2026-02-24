@@ -39,7 +39,7 @@ from src.audit.decision_log import AuditLog
 from src.policy.validator import PolicyValidator
 from src.gitops.pr_creator import GitOpsPublisher
 from src.schemas import ProjectContext, StageResult, Decision, Severity, PolicyViolation
-from src.decision_engine.generator.llm_generator import LLMGenerator # For manual scan hack
+from src.engine.llm_generator import LLMGenerator
 
 logger = get_logger("devops-agent.pipeline")
 
@@ -200,10 +200,10 @@ def run_docker_stage(project_path, context: ProjectContext, audit, publisher=Non
         wa, wb, wc = MockWriter(), MockWriter(), MockWriter()
         class MockDockerReviewer:
             def review_and_merge(self, a, b, c, validation_report=""):
-                if "DOCKERFILE:" in resp:
-                    parts = resp.split("DOCKERFILE:")
+                if "DOCKERFILE:" in a:
+                    parts = a.split("DOCKERFILE:")
                     return (parts[1].strip(), parts[0].replace("REASONING:", "").strip())
-                return (resp, "Mock reasoning")
+                return (a, "Mock reasoning")
         reviewer = MockDockerReviewer()
         
     det_reviewer, executor = DeterministicReviewer(), DockerExecutor()
@@ -238,9 +238,9 @@ def run_compose_stage(project_path, context: ProjectContext, audit, publisher=No
     # Initialize
     try:
         writers = [
-            DockerComposeWriter(GeminiClient()),
-            DockerComposeWriter(GroqClient()),
-            DockerComposeWriter(NvidiaClient())
+            DockerComposeWriter(),
+            DockerComposeWriter(),
+            DockerComposeWriter()
         ]
         reviewer = ComposeReviewer()
     except Exception as e:
@@ -253,7 +253,7 @@ def run_compose_stage(project_path, context: ProjectContext, audit, publisher=No
         ]
         class MockReviewer:
             def review_and_merge(self, a, b, c, validation_report=""):
-                return (resp, "Mock Compose reasoning.")
+                return (a, "Mock Compose reasoning.")
         reviewer = MockReviewer()
     executor = DockerComposeExecutor()
     
@@ -296,10 +296,10 @@ def run_k8s_stage(project_path, context: ProjectContext, audit, publisher=None, 
         wa, wb, wc = MockK8sWriter(), MockK8sWriter(), MockK8sWriter()
         class MockK8sReviewer:
             def review_and_merge(self, a, b, c, validation_report=""):
-                if "YAML:" in resp:
-                    parts = resp.split("YAML:")
+                if "YAML:" in a:
+                    parts = a.split("YAML:")
                     return (parts[1].replace("```yaml", "").replace("```", "").strip(), parts[0].replace("REASONING:", "").strip())
-                return (resp, "Mock reasoning")
+                return (a, "Mock reasoning")
         reviewer = MockK8sReviewer()
         
     det_reviewer = DeterministicReviewer()
@@ -431,51 +431,23 @@ def run_debug_stage(project_path, context: ProjectContext, audit, publisher=None
     a2 = wb.analyze(error_input, ctx_str)
     a3 = wc.analyze(error_input, ctx_str)
     
-    report, reasoning = reviewer.review_and_merge(a1, a2, a3)
+    logger.info("Generating debug analysis (3 variants)", extra={"stage": "Debug"})
+    drafts = [a1, a2, a3]
     
-    print("\n" + "="*40)
-    print("INCIDENT REPORT")
-    print("="*40)
-    print(report)
-    print("="*40 + "\n")
-    
-    executor.run(report, project_path)
-    
-    # Auto-Fix (Self-Healing)
-    choice = input("Attempt to apply fix? (y/n): ").strip().lower()
-    if choice in ('y', 'yes'):
-        file_path = input("Enter path to broken file: ").strip()
-        abs_path = os.path.join(project_path, file_path) if not os.path.isabs(file_path) else file_path
-        
-        if os.path.exists(abs_path):
-            try:
-                from src.tools.file_ops import read_file, write_file
-                content = read_file(abs_path)
-                
-                print("🚑 Self-Healer is analyzing and fixing code...")
-                from src.agents.debugging_agent import SelfHealer
-                healer = SelfHealer()
-                fixed_content = healer.fix_code(content, error_input)
-                
-                print("\nPROPOSED FIX:\n")
-                # Show diff roughly
-                import difflib
-                diff = difflib.unified_diff(content.splitlines(), fixed_content.splitlines(), lineterm='')
-                for line in diff:
-                    print(line)
-                
-                confirm = input("\nApply this fix? (y/n): ").strip().lower()
-                if confirm in ('y', 'yes'):
-                    write_file(abs_path, fixed_content)
-                    print(f"✅ Fix applied to {abs_path}")
-                else:
-                    print("❌ Fix discarded.")
-            except Exception as e:
-                print(f"❌ Self-Healing failed: {e}")
-        else:
-            print(f"❌ File not found: {abs_path}")
-    
-    return StageResult(stage_name="Debug", status=Decision.APPROVE, reasoning="Debugging complete")
+    # Route through stage_decision_loop for policy/audit/approval
+    return stage_decision_loop(
+        stage_name="Debug",
+        reviewer=reviewer,
+        drafts=drafts,
+        executor=executor,
+        run_executor_fn=lambda report: executor.run(report, project_path),
+        guidelines_path="",  # Guidelines N/A for raw debug analysis
+        audit=audit,
+        publisher=publisher,
+        output_files={"INCIDENT_REPORT.md": None},
+        project_path=project_path,
+        run_id=run_id,
+    )
 
 
 # ================================================================
@@ -546,7 +518,7 @@ def run_manual_menu(project_path, context, audit, publisher, run_id):
             return
         elif choice == '2':
             # Temporary manual runner for Scan
-            from src.decision_engine.generator.llm_generator import LLMGenerator
+            from src.engine.llm_generator import LLMGenerator
             from src.llm_clients.gemini_client import GeminiClient
             try:
                 # Reuse V2 generator for manual run

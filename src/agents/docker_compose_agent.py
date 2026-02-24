@@ -1,10 +1,8 @@
-from src.llm_clients.gemini_client import GeminiClient
-from src.llm_clients.nvidia_client import NvidiaClient
 from src.tools.file_ops import read_file, write_file
+from src.engine.llm import call_llm
 
 class DockerComposeWriter:
-    def __init__(self, client):
-        self.llm = client
+    def __init__(self, client=None):
         self.ROLE = "DevOps Engineer"
 
     def generate(self, context_json: str) -> str:
@@ -14,11 +12,11 @@ class DockerComposeWriter:
             task = "Generate a docker-compose.yml."
             
         prompt = f"{task}\n\nAPPLICATION CONTEXT:\n{context_json}"
-        return self.llm.call(prompt)
+        return call_llm("", prompt, task_type="compose")
 
 class ComposeReviewer:
     def __init__(self):
-        self.llm = GeminiClient()
+        pass
     def review_and_merge(self, yaml_a: str, yaml_b: str, yaml_c: str, validation_report: str = "") -> tuple[str, str]:
         feedback_section = ""
         if validation_report:
@@ -55,7 +53,7 @@ class ComposeReviewer:
         ...
         ```
         """
-        response = self.llm.call(prompt)
+        response = call_llm("", prompt, task_type="compose")
         
         # Parse
         try:

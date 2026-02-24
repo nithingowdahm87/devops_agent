@@ -1,9 +1,9 @@
 from src.tools.file_ops import read_file
-from src.llm_clients.gemini_client import GeminiClient
+from src.engine.llm import call_llm
 
 class PromptImprover:
     def __init__(self):
-        self.llm = GeminiClient()
+        pass
     def improve(self, original: str, domain: str) -> str:
         guidelines_path = f"configs/guidelines/{domain}-guidelines.md"
         try:
@@ -23,4 +23,4 @@ Rewrite the prompt to:
 - Include relevant DevOps best practices.
 Return ONLY the improved prompt.
 """.strip()
-        return self.llm.call(prompt)
+        return call_llm("", prompt, task_type="default")

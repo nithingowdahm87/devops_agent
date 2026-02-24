@@ -1,12 +1,10 @@
-from src.llm_clients.gemini_client import GeminiClient
-from src.llm_clients.nvidia_client import NvidiaClient
-from src.llm_clients.groq_client import GroqClient
 from src.tools.file_ops import read_file, write_file
+from src.engine.llm import call_llm
 from src.utils.constants import GUIDELINES_K8S
 
 class K8sWriterA:
     def __init__(self):
-        self.llm = GeminiClient()
+        pass
         
     def generate(self, context: str) -> str:
         try:
@@ -17,11 +15,11 @@ class K8sWriterA:
             task = "Generate Deployment manifests."
             
         prompt = f"{system}\n\n{task}\n\nAPPLICATION CONTEXT:\n{context}"
-        return self.llm.call(prompt)
+        return call_llm(system, prompt, task_type="k8s")
 
 class K8sWriterB:
     def __init__(self):
-        self.llm = GroqClient()
+        pass
     def generate(self, context: str) -> str:
         try:
             system = read_file("configs/prompts/system_master.md")
@@ -31,11 +29,11 @@ class K8sWriterB:
             task = "Generate secure Deployment manifests."
             
         prompt = f"{system}\n\n{task}\n\nAPPLICATION CONTEXT:\n{context}"
-        return self.llm.call(prompt)
+        return call_llm(system, prompt, task_type="k8s")
 
 class K8sWriterC:
     def __init__(self):
-        self.llm = NvidiaClient()
+        pass
         
     def generate(self, context: str) -> str:
         try:
@@ -46,11 +44,11 @@ class K8sWriterC:
             task = "Generate HA Deployment manifests."
             
         prompt = f"{system}\n\n{task}\n\nAPPLICATION CONTEXT:\n{context}"
-        return self.llm.call(prompt)
+        return call_llm(system, prompt, task_type="k8s")
 
 class K8sReviewer:
     def __init__(self):
-        self.llm = GeminiClient()
+        pass
     def review_and_merge(self, yaml_a: str, yaml_b: str, yaml_c: str, validation_report: str = "") -> tuple[str, str]:
         """
         """
@@ -114,7 +112,7 @@ class K8sReviewer:
         
         # Get AI review
         try:
-            response = self.llm.call(review_prompt)
+            response = call_llm("", review_prompt, task_type="k8s")
 
             # Parse response
             if "YAML:" in response:

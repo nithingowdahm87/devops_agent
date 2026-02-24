@@ -1,14 +1,12 @@
-from src.llm_clients.gemini_client import GeminiClient
-from src.llm_clients.nvidia_client import NvidiaClient
-from src.llm_clients.groq_client import GroqClient
 from src.tools.file_ops import read_file, write_file
+from src.engine.llm import call_llm
 import os
 
 
 class DebugWriterA:
     """Root Cause Analysis specialist."""
     def __init__(self):
-        self.llm = GeminiClient()
+        pass
 
     def analyze(self, error_input: str, context: str = "") -> str:
         prompt = f"""
@@ -37,13 +35,13 @@ FIX:
 [exact commands or code changes]
 ```
 """.strip()
-        return self.llm.call(prompt)
+        return call_llm("", prompt, task_type="heal")
 
 
 class DebugWriterB:
     """Security-focused debugger."""
     def __init__(self):
-        self.llm = GroqClient()
+        pass
     def analyze(self, error_input: str, context: str = "") -> str:
         prompt = f"""
 You are a Security Engineer analyzing a production incident.
@@ -69,13 +67,13 @@ FIX:
 [commands or code]
 ```
 """.strip()
-        return self.llm.call(prompt)
+        return call_llm("", prompt, task_type="heal")
 
 
 class DebugWriterC:
     """Performance-focused debugger."""
     def __init__(self):
-        self.llm = NvidiaClient()
+        pass
 
     def analyze(self, error_input: str, context: str = "") -> str:
         prompt = f"""
@@ -102,13 +100,13 @@ FIX:
 [commands or config changes]
 ```
 """.strip()
-        return self.llm.call(prompt)
+        return call_llm("", prompt, task_type="heal")
 
 
 class DebugReviewer:
     """Synthesizes all 3 analyses into a unified incident report."""
     def __init__(self):
-        self.llm = GeminiClient()
+        pass
     def review_and_merge(self, analysis_a: str, analysis_b: str, analysis_c: str, validation_report: str = "") -> tuple[str, str]:
         feedback_section = ""
         if validation_report:
@@ -154,7 +152,7 @@ REPORT:
 3. [step 3]
 """.strip()
 
-        response = self.llm.call(prompt)
+        response = call_llm("", prompt, task_type="heal")
         try:
             if "REPORT:" in response:
                 parts = response.split("REPORT:", 1)
@@ -181,7 +179,7 @@ class DebugExecutor:
 class SelfHealer:
     """Auto-fix agent that applies code patches."""
     def __init__(self):
-        self.llm = GeminiClient()
+        pass
         
     def fix_code(self, file_content: str, error_log: str) -> str:
         """
@@ -196,7 +194,7 @@ class SelfHealer:
         prompt = f"{task}\n\nERROR LOG:\n{error_log}\n\nBROKEN CODE:\n{file_content}"
         
         # Call LLM
-        response = self.llm.call(prompt)
+        response = call_llm("", prompt, task_type="heal")
         
         # Cleanup response if it contains markdown code blocks despite instructions
         clean_response = response.replace("```python", "").replace("```javascript", "").replace("```", "").strip()

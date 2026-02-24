@@ -55,7 +55,7 @@ def load_or_run_analysis(project_path: str) -> ProjectContext:
             detail     = context.microservice_details.get(svc, {})
             lang       = detail.get("language", "Node.js")
             frameworks = detail.get("frameworks", [])
-            version    = detail.get("node_version", "?")
+            version    = detail.get("runtime_version", "?")
             base_img   = detail.get("base_image", "node:20-alpine")
             ports      = detail.get("ports", [])
             key_deps   = detail.get("key_deps", [])

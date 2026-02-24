@@ -1,0 +1,24 @@
+{
+  "run_id": "7e136f27",
+  "started_at": "2026-02-18T17:50:57Z",
+  "completed_at": "2026-02-18T17:50:59Z",
+  "total_decisions": 2,
+  "entries": [
+    {
+      "ts": "2026-02-18T17:50:57Z",
+      "stage": "Docker",
+      "decision": "approve",
+      "cycle": 1,
+      "ai_reasoning": "- Mock Docker review: optimized layers\n- Mock Docker review: non-root user",
+      "drafts_received": 3
+    },
+    {
+      "ts": "2026-02-18T17:50:59Z",
+      "stage": "K8s",
+      "decision": "approve",
+      "cycle": 1,
+      "ai_reasoning": "- Mock K8s review: valid structure\n- Mock K8s review: secure defaults",
+      "drafts_received": 3
+    }
+  ]
+}

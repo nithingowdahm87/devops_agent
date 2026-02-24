@@ -13,7 +13,7 @@ class ContextExtractor:
         # Detect Node
         if os.path.exists(os.path.join(repo_path, "package.json")):
             context["language"] = "node"
-            context["runtime_version"] = self._detect_node_version(repo_path)
+            context["runtime_version"] = self._detect_runtime_version(repo_path)
         # Detect Python
         elif os.path.exists(os.path.join(repo_path, "requirements.txt")) or os.path.exists(os.path.join(repo_path, "pyproject.toml")):
             context["language"] = "python"
@@ -29,7 +29,7 @@ class ContextExtractor:
 
         return context
 
-    def _detect_node_version(self, repo_path: str) -> str:
+    def _detect_runtime_version(self, repo_path: str) -> str:
         # Simplistic detection
         nvmrc_path = os.path.join(repo_path, ".nvmrc")
         if os.path.exists(nvmrc_path):

@@ -347,7 +347,7 @@ class CodeAnalysisAgent:
 
                     microservice_details[rel_dir] = {
                         "language": "Node.js", "frameworks": svc_frameworks,
-                        "node_version": node_ver, "base_image": base_image,
+                        "runtime_version": node_ver, "base_image": base_image,
                         "ports": list(dict.fromkeys(svc_ports)),
                         "key_deps": deps[:6], "role": _infer_role(svc_frameworks, deps, dev_deps, os.path.basename(root)),
                         "databases": svc_dbs,
@@ -355,14 +355,7 @@ class CodeAnalysisAgent:
                 except Exception:
                     microservice_details[rel_dir] = {
                         "language": "Node.js", "frameworks": [], "ports": ["3000"],
-                        "base_image": "node:20-alpine", "node_version": "20",
-                        "role": "Microservice", "databases": [],
-                    }
-
-                except Exception:
-                    microservice_details[rel_dir] = {
-                        "language": "Python", "frameworks": [], "ports": ["8000"],
-                        "base_image": "python:3.11-slim", "node_version": "3.11",
+                        "base_image": "node:20-alpine", "runtime_version": "20",
                         "role": "Microservice", "databases": [],
                     }
 
@@ -395,7 +388,7 @@ class CodeAnalysisAgent:
 
                     microservice_details[rel_dir] = {
                         "language": "Python", "frameworks": svc_frameworks,
-                        "node_version": py_ver, "base_image": f"python:{py_ver}-slim",
+                        "runtime_version": py_ver, "base_image": f"python:{py_ver}-slim",
                         "ports": ["8000"], "key_deps": deps[:6],
                         "role": _infer_role(svc_frameworks, deps, [], os.path.basename(root)),
                         "databases": svc_dbs,
@@ -403,7 +396,7 @@ class CodeAnalysisAgent:
                 except Exception:
                     microservice_details[rel_dir] = {
                         "language": "Python", "frameworks": [], "ports": ["8000"],
-                        "base_image": "python:3.11-slim", "node_version": "3.11",
+                        "base_image": "python:3.11-slim", "runtime_version": "3.11",
                         "role": "Microservice", "databases": [],
                     }
 
@@ -440,7 +433,7 @@ class CodeAnalysisAgent:
                         microservice_details[rel_dir] = {
                             "language": "Java",
                             "frameworks": ["Spring Boot"],
-                            "node_version": "21", # Reusing field for Java version
+                            "runtime_version": "21", # Semantic field for runtime version
                             "base_image": "maven:3.9-eclipse-temurin-21 → eclipse-temurin:21-jre-alpine",
                             "ports": svc_ports,
                             "key_deps": ["spring-boot-starter-web"],
@@ -450,7 +443,7 @@ class CodeAnalysisAgent:
                     except Exception:
                         microservice_details[rel_dir] = {
                             "language": "Java", "frameworks": ["Spring Boot"], "ports": ["8080"],
-                            "base_image": "maven-openjdk", "node_version": "17",
+                            "base_image": "maven-openjdk", "runtime_version": "17",
                             "role": "Spring Boot Service", "databases": []
                         }
 

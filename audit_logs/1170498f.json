@@ -1,0 +1,32 @@
+{
+  "run_id": "1170498f",
+  "started_at": "2026-02-18T17:38:39Z",
+  "completed_at": "2026-02-18T17:38:40Z",
+  "total_decisions": 3,
+  "entries": [
+    {
+      "ts": "2026-02-18T17:38:40Z",
+      "stage": "Compose",
+      "decision": "approve",
+      "cycle": 1,
+      "ai_reasoning": "Mock Compose reasoning.",
+      "drafts_received": 3
+    },
+    {
+      "ts": "2026-02-18T17:38:40Z",
+      "stage": "CI/CD",
+      "decision": "approve",
+      "cycle": 1,
+      "ai_reasoning": "Mock CI Review: Combined security and speed steps.",
+      "drafts_received": 3
+    },
+    {
+      "ts": "2026-02-18T17:38:40Z",
+      "stage": "Observability",
+      "decision": "approve",
+      "cycle": 1,
+      "ai_reasoning": "Mock Review: Standard Prometheus/Loki stack selected.",
+      "drafts_received": 3
+    }
+  ]
+}

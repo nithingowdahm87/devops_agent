@@ -1,50 +1,54 @@
-from src.llm_clients.gemini_client import GeminiClient
-from src.llm_clients.nvidia_client import NvidiaClient
-from src.llm_clients.groq_client import GroqClient
 from src.tools.file_ops import read_file, write_file
+from src.engine.llm import call_llm
 import os
 
 class CIWriterA:
     def __init__(self):
-        self.llm = GeminiClient()
+        pass
         
     def generate(self, context: str) -> str:
         try:
+            system = read_file("configs/prompts/system_master.md")
             task = read_file("configs/prompts/cicd/writer.md")
         except Exception:
+            system = "You are a DevOps Engineer."
             task = "Generate a CI workflow."
             
         prompt = f"{task}\n\nAPPLICATION CONTEXT:\n{context}"
-        return self.llm.call(prompt)
+        return call_llm(system, prompt, task_type="ci")
 
 class CIWriterB:
     def __init__(self):
-        self.llm = GroqClient()
+        pass
     def generate(self, context: str) -> str:
         try:
+            system = read_file("configs/prompts/system_master.md")
             task = read_file("configs/prompts/cicd/writer.md")
         except Exception:
-            task = "Generate a CI workflow."
+            system = "You are a Security Engineer."
+            task = "Generate a secure CI workflow."
             
         prompt = f"{task}\n\nAPPLICATION CONTEXT:\n{context}"
-        return self.llm.call(prompt)
+        return call_llm(system, prompt, task_type="ci")
 
 class CIWriterC:
     def __init__(self):
-        self.llm = NvidiaClient()
+        pass
         
     def generate(self, context: str) -> str:
         try:
+            system = read_file("configs/prompts/system_master.md")
             task = read_file("configs/prompts/cicd/writer.md")
         except Exception:
-            task = "Generate a CI workflow."
+            system = "You are a Performance Engineer."
+            task = "Generate an optimized CI workflow."
             
         prompt = f"{task}\n\nAPPLICATION CONTEXT:\n{context}"
-        return self.llm.call(prompt)
+        return call_llm(system, prompt, task_type="ci")
 
 class CIReviewer:
     def __init__(self):
-        self.llm = GeminiClient()
+        pass
     def review_and_merge(self, yaml_a: str, yaml_b: str, yaml_c: str, validation_report: str = "") -> tuple[str, str]:
         feedback_section = ""
         if validation_report:
@@ -81,7 +85,7 @@ class CIReviewer:
         ```
         """.strip()
         
-        response = self.llm.call(prompt)
+        response = call_llm("", prompt, task_type="ci")
         try:
             if "YAML:" in response:
                 parts = response.split("YAML:")

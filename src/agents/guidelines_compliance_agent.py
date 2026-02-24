@@ -1,11 +1,11 @@
 import os
 import json
 from src.tools.file_ops import read_file, write_file
-from src.llm_clients.gemini_client import GeminiClient
+from src.engine.llm import call_llm
 
 class GuidelinesComplianceAgent:
     def __init__(self):
-        self.llm = GeminiClient()
+        pass
 
     def analyze_and_update(self, reasoning: str, guidelines_path: str) -> dict:
         """
@@ -48,7 +48,7 @@ class GuidelinesComplianceAgent:
         """
         
         try:
-            response = self.llm.call(prompt)
+            response = call_llm("", prompt, task_type="policy")
             # Find JSON block if wrapped
             if "```json" in response:
                 response = response.split("```json")[1].split("```")[0].strip()
