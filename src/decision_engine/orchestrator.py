@@ -1,13 +1,14 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
+import os
+import re
+import concurrent.futures
 
-# Schemas
 from src.schemas import ProjectContext, Decision, StageResult
 from src.decision_engine.contracts.architecture_plan import ArchitecturePlan
 from src.decision_engine.contracts.infra_spec import InfraSpec
 from src.decision_engine.contracts.decision_result import DecisionResult
 
-# Modules
 from src.decision_engine.planner.architecture_planner import ArchitecturePlanner
 from src.decision_engine.generator.llm_generator import LLMGenerator
 from src.decision_engine.scoring.scorecard import weighted_score
@@ -18,95 +19,90 @@ from src.decision_engine.confidence.action_router import decide_action
 from src.utils.prompt_loader import load_prompt
 from src.memory.long_term_memory import LongTermMemory
 
-# Clients
 from src.llm_clients.gemini_client import GeminiClient
-from src.llm_clients.nvidia_client import NvidiaClient
 from src.llm_clients.groq_client import GroqClient
+from src.llm_clients.nvidia_client import NvidiaClient
 from src.llm_clients.mock_client import MockClient
 
-# Engine
-from src.engine.validate import Validator
-from src.engine.heal import Healer
-from src.engine.models import GeneratedFile
-
-# Tools
 from src.tools.file_ops import write_file
 
 logger = logging.getLogger("devops-agent")
 
+
 class V2Orchestrator:
-    def __init__(self, environment: str = "dev"):
+    def __init__(self):
         self.planner = ArchitecturePlanner()
         self.evaluator = Evaluator()
         self.repair_agent = RepairAgent()
-        self.validator = Validator()
-        self.healer = Healer()
-        self.environment = environment
-        self.memory = None # Init later with project_path
-        
-        # Initialize Generators (Safe Layout)
+        self.memory = None
         self.generators = []
         self._init_generators()
-        
+
     def _init_generators(self):
-        """Try to init real clients, fallback to mock."""
         clients = [
             ("Gemini", GeminiClient),
-            ("Groq", GroqClient),
-            ("NVIDIA", NvidiaClient)
+            ("Groq",   GroqClient),
+            ("NVIDIA", NvidiaClient),
         ]
-        
         for name, cls in clients:
             try:
                 client = cls()
                 self.generators.append(LLMGenerator(client, name))
             except Exception as e:
                 logger.warning(f"Failed to init {name} client: {e}. Using Mock.")
-                self.generators.append(LLMGenerator(MockClient(name=f"Mock-{name}"), f"Mock-{name}"))
-        
-    def run_pipeline(self, project_path: str, context: ProjectContext, environment: str = "dev", no_llm: bool = False):
-        """
-        Main entry point for V2 Pipeline.
-        """
-        logger.info("🚀 Starting V2 Decision Engine Pipeline")
-        self.memory = LongTermMemory(project_path)
+                self.generators.append(
+                    LLMGenerator(MockClient(name=f"Mock-{name}"), f"Mock-{name}")
+                )
 
-        
-        # 1. Plan Architecture
+    # ------------------------------------------------------------------ #
+    # PUBLIC ENTRY POINT                                                   #
+    # ------------------------------------------------------------------ #
+    def run_pipeline(
+        self,
+        project_path: str,
+        context: ProjectContext,
+        environment: str = "prod",   # FIX: accepts environment kwarg from main.py
+        no_llm: bool = False,        # FIX: accepts no_llm kwarg from main.py
+    ):
+        logger.info("Starting V2 Decision Engine Pipeline")
+        self.memory = LongTermMemory(project_path)
+        self.environment = environment
+        self.no_llm = no_llm
+
         plan = self.planner.create_plan(context)
-        print(f"🏗️  Architecture Plan: {plan.service_type.upper()} | Scaling: {plan.scaling_strategy} | DB: {plan.requires_database}")
-        
-        # 2. Print rich analysis summary
+        print(
+            f"🏗️  Architecture Plan: {plan.service_type.upper()} "
+            f"| Scaling: {plan.scaling_strategy} | DB: {plan.requires_database}"
+        )
+
+        # ── Summary banner ──────────────────────────────────────────
         is_mono = "microservices" not in context.architecture
         num_dockerfiles = len(context.microservice_dirs) if not is_mono else 1
-
         dbs = context.databases if context.databases else {}
 
-        # Normalise: old cache stores lists, new stores {name: [svcs]}
         def _norm(d):
             if isinstance(d, list): return {k: [] for k in d}
             if isinstance(d, dict): return d
             return {}
+
         rdbms_dict  = _norm(dbs.get("rdbms", {}))
         cache_dict  = _norm(dbs.get("cache", {}))
         nosql_dict  = _norm(dbs.get("nosql", {}))
         broker_dict = _norm(dbs.get("broker", {}))
 
-        # Fallback legacy
-        if not rdbms_dict and "postgres" in context.architecture: rdbms_dict = {"PostgreSQL": []}
-        if not cache_dict  and "redis"    in context.architecture: cache_dict  = {"Redis": []}
+        if not rdbms_dict and "postgres" in context.architecture:
+            rdbms_dict = {"PostgreSQL": []}
+        if not cache_dict and "redis" in context.architecture:
+            cache_dict = {"Redis": []}
 
-        # Service numbering map {svc -> "#N"}
         svc_index = {svc: f"#{i+1}" for i, svc in enumerate(context.microservice_dirs)}
-
-        # Global port chain across all services in order
         all_ports = []
         for svc in context.microservice_dirs:
             for p in context.microservice_details.get(svc, {}).get("ports", []):
                 if p not in all_ports:
                     all_ports.append(p)
 
-        def _db_tag(svcs: list) -> str:
+        def _db_tag(svcs):
             if not svcs: return ""
             parts = [f"{svc_index.get(s, s)} {s}" for s in svcs]
             return f"  ← {', '.join(parts)}"
@@ -123,7 +119,6 @@ class V2Orchestrator:
             print(f"  🔌  Port chain    : {chain}")
         print()
 
-        # ── Per-service section ─────────────────────────────────────
         if not is_mono and context.microservice_dirs:
             print("  ── MICROSERVICES " + "─" * (W - 18))
             for idx, svc in enumerate(context.microservice_dirs, start=1):
@@ -136,10 +131,8 @@ class V2Orchestrator:
                 key_deps   = detail.get("key_deps", [])
                 role       = detail.get("role", "Microservice")
                 svc_dbs    = detail.get("databases", [])
-
                 fw_str     = f" · {', '.join(frameworks)}" if frameworks else ""
                 port_chain = "  →  ".join([f":{p}" for p in ports]) if ports else "auto"
-
                 print(f"  #{idx}  {svc}/  —  {role}")
                 print(f"       Language    : {lang}{fw_str}")
                 print(f"       Runtime     : {lang} {version}")
@@ -151,7 +144,6 @@ class V2Orchestrator:
                     print(f"       Uses DBs    : {', '.join(svc_dbs)}")
                 print()
 
-        # ── Databases section ───────────────────────────────────────
         has_db = rdbms_dict or cache_dict or nosql_dict or broker_dict
         if has_db:
             print("  ── DATABASES " + "─" * (W - 14))
@@ -168,365 +160,271 @@ class V2Orchestrator:
         if context.env_vars:
             print("  ── CONFIGURATION " + "─" * (W - 18))
             shown = context.env_vars[:7]
-            print(f"  🔐  Env vars      : {', '.join(shown)}{' ...' if len(context.env_vars) > 7 else ''}")
+            print(
+                f"  🔐  Env vars      : {', '.join(shown)}"
+                f"{'  ...' if len(context.env_vars) > 7 else ''}"
+            )
             print()
 
         print("=" * W + "\n")
 
-
-        # 3. Execute Stages based on Plan
-
-        # --- STAGE: Scan & Observability (NEW) ---
-        # self._execute_stage("Scan & Observability", "scan", project_path, context, plan)
-
-
-        # 6. Run Stages (Level 10 Deterministic Sequence)
-        all_artifacts = {}
-        for stage in ["dockerfile", "docker_compose", "kubernetes", "cicd"]:
-             res_files = self._execute_stage(stage.replace("_", " "), stage, project_path, context, plan, environment=environment, no_llm=no_llm)
-             if res_files:
-                 for f in res_files:
-                     all_artifacts[f.path] = f.content
-
-        # 7. Level 10 Post-Generation Stage (Audit & Manifest)
-        print("\n--- Stage 5: Global Integrity Audit ---")
-        from src.engine.integrity import IntegrityAuditor
-        from src.engine.graph import ArchitectureGraph
-        # Construct graph for audit
-        graph = ArchitectureGraph()
-        for svc_dir in context.microservice_dirs:
-             p = context.microservice_details.get(svc_dir, {}).get("ports", ["8080"])[0]
-             graph.add_node(svc_dir, p)
-        
-        auditor = IntegrityAuditor(graph)
-        for path, content in all_artifacts.items():
-            auditor.add_artifact(path, content)
-        
-        findings = auditor.run_audit()
-        if findings:
-            print("🔍 Audit Findings:")
-            for sev, msg in findings:
-                print(f"  [{sev.name}] {msg}")
-        else:
-            print("✅ Integrity Audit Passed.")
-
-        from src.engine.secrets_manifest import SecretsManifest
-        SecretsManifest.generate(project_path, all_artifacts)
+        # ── Execute stages ─────────────────────────────────────────
+        self._execute_stage("Dockerfile",           "dockerfile",     project_path, context, plan)
+        self._execute_stage("Docker Compose",       "docker_compose", project_path, context, plan)
+        self._execute_stage("Kubernetes Manifests", "kubernetes",     project_path, context, plan)
+        self._execute_stage("CI Pipeline",          "cicd",           project_path, context, plan)
 
         print("\n🎉 Pipeline Execution Completed Successfully!")
-        import os
+
         for f in [".devops_context.json", ".devops_memory.json"]:
             fpath = os.path.join(project_path, f)
             if os.path.exists(fpath):
-                try: os.remove(fpath)
-                except Exception: pass
+                try:
+                    os.remove(fpath)
+                except Exception:
+                    pass
+
         import sys
         sys.exit(0)
 
-        
-    def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan, environment: str = "dev", no_llm: bool = False):
+    # ------------------------------------------------------------------ #
+    # STAGE EXECUTOR                                                       #
+    # ------------------------------------------------------------------ #
+    def _execute_stage(
+        self,
+        display_name: str,
+        stage_key: str,
+        project_path: str,
+        context: ProjectContext,
+        plan: ArchitecturePlan,
+    ):
         print(f"\n--- Stage: {display_name} ---")
-        
-        # 1. Load Prompts
-        # Mapping to the new "Elite" prompt structure
+
+        # 1. Load prompt template
         prompt_map = {
-            "dockerfile": ("docker", "docker_production"),
-            "kubernetes": ("k8s", "k8s_production"),
-            "cicd": ("cicd", "cicd_production"),
-            "scan": ("debug", "healer"), # Simplified
-            "docker_compose": ("docker", "docker_compose")
+            "dockerfile":     ("docker", "docker_production"),
+            "kubernetes":     ("k8s",    "k8s_production"),
+            "cicd":           ("cicd",   "cicd_production"),
+            "scan":           ("debug",  "healer"),
+            "docker_compose": ("docker", "docker_production"),
         }
-        
         prompt_dir, prompt_name = prompt_map.get(stage_key, (stage_key, "writer_a"))
-        
+
         try:
             template = load_prompt(prompt_dir, prompt_name)
         except Exception as e:
-            logger.warning(f"Failed to load prompt {prompt_dir}/{prompt_name}: {e}. Falling back to elite defaults.")
-            # Final fallback to known elite prompts
-            if "docker" in stage_key: template = load_prompt("docker", "docker_production")
-            elif "k8s" in stage_key or "kubernetes" in stage_key: template = load_prompt("k8s", "k8s_production")
-            elif "ci" in stage_key: template = load_prompt("cicd", "cicd_production")
-            else: raise FileNotFoundError(f"Could not find any prompt for stage: {stage_key}")
-            
-        # Optional User Input for K8s & Dockerfile
-        custom_instructions = ""
-        if stage_key == "kubernetes" or stage_key == "dockerfile":
-            if stage_key == "kubernetes":
-                template += "\n\nCRITICAL: Output EACH Kubernetes resource (Deployment, Service, Ingress, Secrets, ConfigMap, Namespace etc.) in its OWN SEPARATE file using the FILENAME format: \nFILENAME: k8s/filename.yaml\n```yaml\n<content>\n```"
-                print("\n" + "="*50)
-                print("☸️   KUBERNETES MANIFEST CUSTOMIZATION")
-                print("="*50)
-            if stage_key == "dockerfile" and len(context.microservice_dirs) > 0:
-                dirs = ", ".join(context.microservice_dirs)
-                template += f"\n\nCRITICAL: Automatically output EACH Dockerfile in its respective directory using the FILENAME format (e.g., frontend/Dockerfile, backend/Dockerfile). These are the required directories to cover: {dirs}\nFILENAME: <dir>/Dockerfile\n```dockerfile\n<content>\n```"
+            logger.warning(f"Failed to load prompt {prompt_dir}/{prompt_name}: {e}")
+            if "docker" in stage_key:
+                template = load_prompt("docker", "docker_production")
+            elif "k8s" in stage_key or "kubernetes" in stage_key:
+                template = load_prompt("k8s", "k8s_production")
+            elif "ci" in stage_key:
+                template = load_prompt("cicd", "cicd_production")
             else:
-                user_input = input(f"Would you like to provide custom instructions for {display_name}? [y/N]: ").strip().lower()
-                if user_input in ['y', 'yes']:
-                    print("Options for Custom Instructions:")
-                    print("  1. Type instructions directly")
-                    print("  2. Provide a path to a file with instructions")
-                    choice = input("Choice (1/2): ").strip()
-                    if choice == '1':
-                        custom_instructions = input("Enter instructions: ").strip()
-                    elif choice == '2':
-                        filepath = input("Enter file path: ").strip()
-                        try:
-                            from src.tools.file_ops import read_file
-                            custom_instructions = read_file(filepath)
-                        except Exception as e:
-                            print(f"Failed to read file: {e}")
-                    
-                    if custom_instructions:
-                        template += f"\n\nUSER CUSTOM INSTRUCTIONS (MUST FOLLOW):\n{custom_instructions}"
-            
-        # 2. Generate Drafts (Parallel)
+                raise FileNotFoundError(f"No prompt found for stage: {stage_key}")
+
+        # 2. Append FILENAME: format instruction per stage
+        if stage_key == "dockerfile":
+            if context.microservice_dirs:
+                dirs = ", ".join(context.microservice_dirs)
+                template += (
+                    f"\n\nCRITICAL: Output EACH Dockerfile in its respective service "
+                    f"directory using EXACTLY this format for every service:\n"
+                    f"FILENAME: <service_dir>/Dockerfile\n"
+                    f"```dockerfile\n<content>\n```\n"
+                    f"Required service directories: {dirs}"
+                )
+            else:
+                template += (
+                    "\n\nCRITICAL: Output the Dockerfile using EXACTLY this format:\n"
+                    "FILENAME: Dockerfile\n"
+                    "```dockerfile\n<content>\n```"
+                )
+
+        elif stage_key == "docker_compose":
+            # FIX: docker_compose also needs FILENAME: blocks so nginx.conf is not lost
+            template += (
+                "\n\nCRITICAL: Output ALL files (docker-compose.yml AND any nginx.conf "
+                "or other referenced config files) each using EXACTLY this format:\n"
+                "FILENAME: <filepath>\n"
+                "```yaml\n<content>\n```"
+            )
+
+        elif stage_key == "kubernetes":
+            dirs = ", ".join(context.microservice_dirs) if context.microservice_dirs else "app"
+            template += (
+                "\n\nCRITICAL: Output EACH Kubernetes resource "
+                "(Deployment, Service, Ingress, HPA, ConfigMap, Namespace, ServiceAccount) "
+                "in its OWN SEPARATE file using EXACTLY this format:\n"
+                "FILENAME: k8s/<service>/deployment.yaml\n"
+                "```yaml\n<content>\n```\n"
+                f"Services to cover: {dirs}"
+            )
+            print("\n" + "=" * 50)
+            print("☸️   KUBERNETES MANIFEST CUSTOMIZATION")
+            print("=" * 50)
+            user_input = input(
+                "Would you like to provide custom instructions for kubernetes? [y/N]: "
+            ).strip().lower()
+            if user_input in ["y", "yes"]:
+                custom = input("Enter instructions: ").strip()
+                if custom:
+                    template += f"\n\nUSER CUSTOM INSTRUCTIONS (MUST FOLLOW):\n{custom}"
+
+        elif stage_key == "cicd":
+            template += (
+                "\n\nCRITICAL: Output the CI workflow using EXACTLY this format:\n"
+                "FILENAME: .github/workflows/ci.yml\n"
+                "```yaml\n<content>\n```"
+            )
+
+        # 3. Build prompt context
         prompt_context = {
-            "context": context.raw_context_summary,  # Or structured data? format() needs string usually, or we pass dict unpacking
-            "plan_summary": str(plan) # Pass plan details to the prompt!
+            "context": context.raw_context_summary,
+            "plan_summary": str(plan),
         }
-        # Add specific fields
         prompt_context.update(context.model_dump())
-        
-        # --- Level 10 Deterministic Looping (Gap 4) ---
-        if stage_key == "dockerfile" and context.microservice_dirs:
-            dirs_str = "\n".join([f"- {d}" for d in context.microservice_dirs])
-            template += f"\n\nCRITICAL: Generate a separate Dockerfile for EACH of these {len(context.microservice_dirs)} services:\n{dirs_str}\nUse FILENAME: <dir>/Dockerfile for each."
-        
-        if stage_key == "docker_compose" and context.microservice_dirs:
-            svc_str = "\n".join([f"- {d} (port {context.microservice_details.get(d, {}).get('ports', ['8080'])[0]})" for d in context.microservice_dirs])
-            template += f"\n\nCRITICAL: Generate docker-compose.yml listing ALL {len(context.microservice_dirs)} services:\n{svc_str}\nInclude postgres and redis if referenced. Use FILENAME: docker-compose.yml"
 
-        if stage_key == "kubernetes" and context.microservice_dirs:
-            svc_str = ", ".join(context.microservice_dirs)
-            template += f"\n\nCRITICAL: Generate K8s manifests for ALL services: {svc_str}.\nInclude Namespace, Service, Deployment, HPA, NetworkPolicy as separate files. Use FILENAME: k8s/<svc>/<file>.yaml format."
-        
+        # 4. Generate drafts in parallel
         candidates = []
-        if no_llm:
-            print(f"  [!] no-llm mode enabled. Skipping generation for {stage_key}.")
-            from src.engine.fallbacks import FALLBACK_DIR
-            fb_map = {
-                "dockerfile": "Dockerfile",
-                "docker_compose": "docker-compose.yml",
-                "kubernetes": "k8s-deployment.yaml",
-                "cicd": "gha-ci.yml"
-            }
-            fb_path = os.path.join(FALLBACK_DIR, fb_map.get(stage_key, "Dockerfile"))
-            from src.tools.file_ops import read_file
-            if os.path.exists(fb_path):
-                content = read_file(fb_path)
-                # Mock a candidate
-                from dataclasses import dataclass
-                @dataclass
-                class MockCandidate:
-                    file_content: str
-                    model_name: str = "Fallback-Template"
-                    reasoning: str = "Hardware-locked deterministic fallback"
-                candidates.append(MockCandidate(file_content=content))
-        else:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                futures = [executor.submit(g.generate, template, prompt_context) for g in self.generators]
-                for f in concurrent.futures.as_completed(futures):
-                    try:
-                        candidates.append(f.result())
-                    except Exception as e:
-                        logger.error(f"Generator failed: {e}")
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(self.generators)
+        ) as executor:
+            futures = [
+                executor.submit(g.generate, template, prompt_context)
+                for g in self.generators
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    candidates.append(future.result())
+                except Exception as e:
+                    logger.error(f"Generator failed: {e}")
 
-        # 3. Score & Select
-        # We need to simulate scoring. Real scoring needs static analysis (hadolint, kubeconform).
-        # For this prototype, we will simplistic random/heuristic scoring 
-        # OR we just implement basic length/keyword checks in 'Scorecard' if possible.
-        # WE haven't implemented REAL scoring in scorecard.py yet, it just takes the spec's self-reported score.
-        # So we must "grade" them here or assume the Generator does it? Generator doesn't know.
-        # Let's add a "Grader" step? 
-        # For now, we will assign mock scores to test the flow.
+        if not candidates:
+            print("❌ All generators failed for this stage.")
+            return
+
+        # 5. Heuristic scoring
         for c in candidates:
-            content = c.file_content.lower()
-            # --- Security & Quality heuristics (0-100) ---
-            score = 50  # base
-            
-            # Docker specific
-            if stage_key == "dockerfile":
-                if "from " in content and " as " in content:
-                    score += 15  # multi-stage build reward
-                if "user " in content and ("adduser" in content or "useradd" in content or "appuser" in content):
-                    score += 15  # non-root user
-                if "healthcheck" in content:
-                    score += 10  # healthcheck presence
-                if "npm ci" in content or "pip install --no-cache-dir" in content:
-                    score += 5   # optimized installs
-                if ":latest" not in content:
-                    score += 5   # pinned versions
-            
-            # Kubernetes specific
-            elif stage_key == "kubernetes":
-                if "resources:" in content and "limits:" in content:
-                    score += 20  # resource limits
-                if "runasnonroot: true" in content or "runasuser:" in content:
-                    score += 15  # security context
-                if "readinessprobe:" in content or "livenessprobe:" in content:
-                    score += 10  # probes
-                if "networkpolicy" in content.lower():
-                    score += 5   # network policy presence
-            
-            # CI/CD specific
-            elif stage_key == "cicd":
-                if "trivy" in content or "gitleaks" in content or "sonar" in content:
-                    score += 20  # integrated security scans
-                if "permissions:" in content:
-                    score += 10  # explicit permissions
-                if "needs:" in content:
-                    score += 5   # job dependencies
-            
-            # Penalties
-            if "privileged: true" in content:
-                score -= 30
-            if "copy . env" in content or "env_file:" in content:
-                # Potential secret exposure (rough check)
-                score -= 10
+            content_lower = c.file_content.lower()
+            sec = 60
+            if "user " in content_lower and any(
+                x in content_lower for x in ("adduser", "useradd", "nonroot")
+            ):
+                sec += 15
+            if ":latest" not in content_lower:
+                sec += 10
+            if any(
+                x in content_lower
+                for x in ("no-cache", "--no-cache-dir", "rm -rf /var/lib")
+            ):
+                sec += 10
+            if "copy .env" not in content_lower and "env password" not in content_lower:
+                sec += 5
+            c.security_score = min(100, sec)
 
-            c.security_score = min(100, max(0, score))
-            c.compliance_score = c.security_score # Tie them for now
-
-            # --- Best-practice heuristics (0-100) ---
-            bp = 60  # base
-            if "as builder" in content:
-                bp += 15  # multi-stage build
-            if "workdir" in content:
-                bp += 10  # WORKDIR used
-            if 'cmd ["' in content or "cmd ['":
-                bp += 10  # exec form CMD
-            if "label org.opencontainers" in content or "label maintainer" in content:
-                bp += 5   # OCI labels
+            bp = 60
+            if "as builder" in content_lower:
+                bp += 15
+            if "workdir" in content_lower:
+                bp += 10
+            if 'cmd ["' in content_lower or "cmd ['" in content_lower:
+                bp += 10
+            if (
+                "label org.opencontainers" in content_lower
+                or "label maintainer" in content_lower
+            ):
+                bp += 5
             c.best_practice_score = min(100, bp)
 
-        # Model agreement score: ratio of generators that returned useful content
         useful = sum(1 for c in candidates if len(c.file_content.strip()) > 100)
         model_agreement = useful / max(len(candidates), 1)
 
-        if not candidates:
-            print("❌ All generators failed.")
-            return
-
+        # 6. Select best draft
         best_spec, best_score = self.evaluator.evaluate_candidates(candidates)
         print(f"🏆 Selected Draft from {best_spec.model_name} (Score: {best_score:.1f})")
-        
-        # 4. Level 10 Validation & Policy Engine
-        from src.engine.policy_engine import PolicyEngine
-        from src.models.domain import ProjectModel
-        # Basic model for policy
-        policy_model = ProjectModel(project_name=context.project_name, services=[], environment=environment)
-        policy_engine = PolicyEngine(policy_model)
-        print(f"验证: {best_spec.model_name} draft...")
-        
+
         final_content = best_spec.file_content
-        
-        # Determine if we need to split multifile
-        if stage_key in ["dockerfile", "kubernetes", "docker_compose", "cicd"]:
-            import re
-            pattern = r"FILENAME: (.*?)\n```(?:\w+)?\n(.*?)```"
-            matches = re.findall(pattern, final_content, re.DOTALL)
-            
-            if matches:
-                processed_files = []
-                from src.engine.artifact_manager import ArtifactManager
-                from src.engine.severity import Severity
-                art_mgr = ArtifactManager(project_path, environment)
-                
-                for rel_path, f_content in matches:
-                    gen_file = GeneratedFile(path=rel_path.strip(), content=f_content.strip())
-                    val_res = self.validator.validate(gen_file)
-                    
-                    # Policy Checks
-                    policy_findings = policy_engine.validate_artifact(rel_path, f_content)
-                    if policy_findings:
-                        val_res.passed = False
-                        val_res.errors.extend([f"POLICY: {msg}" for sev, msg in policy_findings])
+        if not final_content.strip():
+            print("⚠️  Selected draft is empty. Skipping write.")
+            return
 
-                    if not val_res.passed:
-                        print(f"  [!] Validation failed for {rel_path}. Healing...")
-                        gen_file = self.healer.heal(gen_file, val_res.errors)
-                        # Final re-validate
-                        val_res = self.validator.validate(gen_file)
-                    
-                    # Level 10 Idempotency (Gap 3)
-                    from src.engine.idempotency import IdempotencyEngine
-                    gen_file.content = IdempotencyEngine.stabilize(gen_file.path, gen_file.content)
+        # 7. Confidence gate
+        confidence_val = compute_confidence(
+            best_spec, repair_attempts=0, model_agreement_score=model_agreement
+        )
+        decision = decide_action(confidence_val)
 
-                    # Level 10 Write Gate
-                    sev = Severity.HIGH if not val_res.passed else Severity.LOW
-                    art_mgr.write_gate(gen_file.path, gen_file.content, sev)
-                    processed_files.append(gen_file)
-                return processed_files
-            else:
-                # Legacy fallback single file
-                filename = "generated_file"
-                if stage_key == "cicd": filename = ".github/workflows/main.yml"
-                
-                gen_file = GeneratedFile(path=filename, content=final_content)
-                val_res = self.validator.validate(gen_file)
-                
-                # Policy Checks
-                policy_findings = policy_engine.validate_artifact(filename, final_content)
-                if policy_findings:
-                    val_res.passed = False
-                    val_res.errors.extend([f"POLICY: {msg}" for sev, msg in policy_findings])
+        if decision.requires_human_gate:
+            print(f"\n🤖 Confidence: {confidence_val:.1f}% → Action: {decision.action.upper()}")
+            print(f"   Reason: {decision.reason}")
+            user_input = input(f"Proceed with {display_name}? [y/n]: ").lower()
+            if user_input != "y":
+                print("Skipping write.")
+                return
 
-                if not val_res.passed:
-                    gen_file = self.healer.heal(gen_file, val_res.errors)
-                
-                # Level 10 Idempotency (Gap 3)
-                from src.engine.idempotency import IdempotencyEngine
-                gen_file.content = IdempotencyEngine.stabilize(gen_file.path, gen_file.content)
+        # 8. Write output — ALL stages go through multifile handler
+        self._handle_multifile_output(final_content, project_path, stage_key)
 
-                from src.engine.artifact_manager import ArtifactManager
-                from src.engine.severity import Severity
-                art_mgr = ArtifactManager(project_path, environment)
-                sev = Severity.HIGH if not val_res.passed else Severity.LOW
-                art_mgr.write_gate(gen_file.path, gen_file.content, sev)
-                print(f"✅ Processed {filename}")
-                return [gen_file]
-        else:
-            # Legacy fallback single file (e.g. cicd if not in multi-list above)
-            return []
-        
-        # 8. Save to Memory
+        # 9. Store in memory
         self.memory.store_decision(
             stage=stage_key,
             content=final_content,
-            reason=best_spec.reasoning,
-            decision="APPROVED"
+            reason=decision.reason,
+            decision="APPROVED",
         )
 
-    def _write_files_direct(self, files: list[GeneratedFile], project_path: str):
-        import os
-        print("📦 Writing Validated Config Files:")
-        for f in files:
-            full_path = os.path.join(project_path, f.path)
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            with open(full_path, "w") as out:
-                out.write(f.content)
-            print(f"  - Created {f.path}")
-
-    def _handle_multifile_output(self, content: str, project_path: str):
-        """Helper to parse FILENAME: blocks and write them."""
-        import re
-        import os
-        
-        pattern = r"FILENAME: (.*?)\n```(?:\w+)?\n(.*?)```"
+    # ------------------------------------------------------------------ #
+    # MULTIFILE OUTPUT HANDLER                                             #
+    # ------------------------------------------------------------------ #
+    def _handle_multifile_output(
+        self, content: str, project_path: str, stage_key: str = ""
+    ):
+        """
+        Parse FILENAME: blocks from LLM output and write each to disk.
+        - Handles \\r\\n line endings
+        - Handles optional blank lines between FILENAME: and fence
+        - Guards against corrupt paths (content embedded in path name)
+        - Falls back to a sensible default filename per stage
+        """
+        # Flexible: optional CR, optional blank lines, optional fence lang tag
+        pattern = r"FILENAME:\s*([^\r\n]+)[\r\n]+```[\w.-]*[\r\n]+(.*?)```"
         matches = re.findall(pattern, content, re.DOTALL)
-        
+
         if matches:
             print("📦 Writing Multiple Config Files:")
             for rel_path, file_content in matches:
-                rel_path = rel_path.strip()
+                rel_path = rel_path.strip().lstrip("/")
+
+                # Guard: path must not contain newlines or be a huge blob
+                if "\n" in rel_path or len(rel_path) > 255:
+                    import hashlib
+                    digest = hashlib.md5(rel_path.encode()).hexdigest()[:8]
+                    rel_path = f"recovered_{digest}.txt"
+                    print(f"  ⚠️  Corrupt path detected, saving as {rel_path}")
+
                 full_path = os.path.join(project_path, rel_path)
-                os.makedirs(os.path.dirname(full_path), exist_ok=True)
-                write_file(full_path, file_content.strip())
+                # FIX: always derive dir from abspath to avoid makedirs("")
+                dir_path = os.path.dirname(os.path.abspath(full_path))
+                os.makedirs(dir_path, exist_ok=True)
+                with open(full_path, "w", encoding="utf-8") as fh:
+                    fh.write(file_content.strip())
                 print(f"  - Created {rel_path}")
         else:
-            print("⚠️ No referenced files found in content. Dumping raw to 'scan_configs.md'")
-            write_file(os.path.join(project_path, "scan_configs.md"), content)
-
-
+            fallback_map = {
+                "dockerfile":     "Dockerfile",
+                "docker_compose": "docker-compose.yml",
+                "kubernetes":     "k8s/manifest.yaml",
+                "cicd":           ".github/workflows/ci.yml",
+                "scan":           "scan_configs.md",
+            }
+            fallback = fallback_map.get(stage_key, "generated_output.txt")
+            print(
+                f"⚠️  No FILENAME: blocks found in LLM output. "
+                f"Writing raw output to '{fallback}'"
+            )
+            full_path = os.path.join(project_path, fallback)
+            dir_path = os.path.dirname(os.path.abspath(full_path))
+            os.makedirs(dir_path, exist_ok=True)
+            with open(full_path, "w", encoding="utf-8") as fh:
+                fh.write(content)
