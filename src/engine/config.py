@@ -38,6 +38,7 @@ LLM_TEMPERATURE    = float(_e("LLM_TEMPERATURE", "0.1"))
 LLM_MAX_TOKENS     = int(_e("LLM_MAX_TOKENS",    "8192"))
 LLM_TIMEOUT        = int(_e("LLM_TIMEOUT_SECONDS", "45"))
 LLM_MAX_RETRIES    = int(_e("LLM_MAX_RETRIES",   "3"))
+MAX_HEAL_RETRIES   = int(_e("MAX_HEAL_RETRIES", "3"))
 
 # ── Per-provider model pins ───────────────────────────────────────────────────
 GROQ_MODEL         = _e("GROQ_MODEL",        "llama-3.3-70b-versatile")
