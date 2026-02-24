@@ -1,23 +1,33 @@
+# Secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# LLM prompt cache — never commit
+.cache/
+
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
+*.pyc
+*.pyo
+.venv/
 venv/
-.env
-.pytest_cache/
-*.log
-.coverage
-htmlcov/
+*.egg-info/
 dist/
 build/
 
-# IDEs
-.vscode/
-.idea/
+# Node
+node_modules/
 
 # OS
 .DS_Store
+Thumbs.db
 
-# Agent Artifacts
-audit_logs/
-.devops_context.json
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Linter output
+.hadolint_cache/
+trivy-*.sarif

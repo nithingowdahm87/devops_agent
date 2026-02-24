@@ -1,119 +1,119 @@
-import os
-import re
-from src.llm_clients.nvidia_client import NvidiaClient
-from src.engine.models import GeneratedFile
-from src.engine.sampler import Sampler
-from src.engine.constitution import Constitution
+"""
+LLM Router — 6-provider fallback chain with exponential backoff.
+Provider order: Groq → Gemini → Cerebras → NVIDIA → OpenRouter → HuggingFace
+"""
+from __future__ import annotations
+import os, time, logging
+log = logging.getLogger(__name__)
 
-class LLMGenerator:
-    def __init__(self):
-        # Using NVIDIA Llama 405B for high-quality generation
-        self.llm = NvidiaClient()
-        self.sampler = Sampler(self.llm)
-        self.constitution = Constitution(self.llm)
-        self.system_prompt = self._load_prompt("configs/prompts/system/system_core.md")
-        
-    def _load_prompt(self, filepath: str) -> str:
-        try:
-            with open(filepath, 'r') as f:
-                return f.read()
-        except FileNotFoundError:
-            return ""
-            
-    def _get_task_prompt(self, task_type: str) -> str:
-        task_map = {
-            "docker": "configs/prompts/docker/docker_production.md",
-            "k8s": "configs/prompts/k8s/k8s_production.md",
-            "ci": "configs/prompts/cicd/cicd_production.md"
-        }
-        path = task_map.get(task_type.lower())
-        if path:
-            return self._load_prompt(path)
-        return ""
+_BASES = {
+    "groq":        "https://api.groq.com/openai/v1",
+    "nvidia":      "https://integrate.api.nvidia.com/v1",
+    "cerebras":    "https://api.cerebras.ai/v1",
+    "openrouter":  "https://openrouter.ai/api/v1",
+    "huggingface": "https://api-inference.huggingface.co/v1",
+}
 
-    def generate(self, task_type: str, context: dict) -> list[GeneratedFile]:
-        task_prompt = self._get_task_prompt(task_type)
-        if not task_prompt:
-            raise ValueError(f"Unknown task type: {task_type}")
+# ── Task-based model routing ──────────────────────────────────────────────────
+# Each task type gets the best provider first, then falls back automatically.
+_TASK_ROUTES = {
+    "docker":      ["groq",       "gemini",  "cerebras", "nvidia", "openrouter", "huggingface"],
+    "k8s":         ["groq",       "gemini",  "cerebras", "nvidia", "openrouter", "huggingface"],
+    "ci":          ["openrouter", "gemini",  "groq",     "nvidia", "cerebras",   "huggingface"],
+    "heal":        ["gemini",     "groq",    "cerebras", "nvidia", "openrouter", "huggingface"],
+    "critique":    ["openrouter", "gemini",  "groq",     "nvidia", "cerebras",   "huggingface"],
+    "default":     ["groq",       "gemini",  "cerebras", "nvidia", "openrouter", "huggingface"],
+}
 
-        context_str = "\n".join([f"{k}: {v}" for k, v in context.items()])
-        full_prompt = f"{self.system_prompt}\n\n{task_prompt}\n\nAPPLICATION CONTEXT:\n{context_str}"
+def _e(k, d=""): return os.environ.get(k, d).strip()
 
-        print(f"🧠 Generating {task_type} candidates (Self-Consistency)...")
-        candidates = self.sampler.sample(full_prompt)
-        
-        if not candidates:
-             print("❌ Failed to generate any valid candidates.")
-             return []
-             
-        # Pick the most consistent candidate (for simplicity, we grab the first valid one if not doing real embedding scores here, but usually, you'd score. Let's pick the longest one as a simple heuristic for completeness)
-        winner_text = max(candidates, key=len)
-        
-        # Parse the winner into GeneratedFile objects
-        files = self._parse_files(winner_text)
-        
-        # Constitutional Critique
-        critiqued_files = []
-        for f in files:
-            cf = self.constitution.critique(f, task_type)
-            critiqued_files.append(cf)
-            
-        return critiqued_files
+def _cfg():
+    return {
+        "groq":        {"api_key": _e("GROQ_API_KEY"),       "model": _e("GROQ_MODEL",        "llama-3.3-70b-versatile"),           "base_url": _BASES["groq"]},
+        "gemini":      {"api_key": _e("GOOGLE_API_KEY"),      "model": _e("GEMINI_MODEL",       "gemini-2.0-flash-exp")},
+        "nvidia":      {"api_key": _e("NVIDIA_API_KEY"),      "model": _e("NVIDIA_MODEL",       "meta/llama-3.1-70b-instruct"),       "base_url": _BASES["nvidia"]},
+        "cerebras":    {"api_key": _e("CEREBRAS_API_KEY"),    "model": _e("CEREBRAS_MODEL",     "llama3.1-70b"),                      "base_url": _BASES["cerebras"]},
+        "openrouter":  {"api_key": _e("OPENROUTER_API_KEY"),  "model": _e("OPENROUTER_MODEL",   "anthropic/claude-3.5-sonnet"),       "base_url": _BASES["openrouter"]},
+        "huggingface": {"api_key": _e("HUGGINGFACE_TOKEN"),   "model": _e("HUGGINGFACE_MODEL",  "mistralai/Mistral-7B-Instruct-v0.3"),"base_url": _BASES["huggingface"]},
+    }
 
-    def _parse_files(self, response: str) -> list[GeneratedFile]:
-        files = []
-        # Strong pattern: ### FILENAME: path\n```ext\ncontent``` 
-        # Added support for optional extensions and more flexible headers
-        pattern = r"(?:###\s*)?FILENAME:\s*([^\s\n]+).*\n(?:```[\w]*\n)?(.*?)(?:```|$)"
-        matches = re.finditer(pattern, response, re.DOTALL | re.IGNORECASE)
-        
-        for match in matches:
-            path = match.group(1).strip()
-            content = match.group(2).strip()
-            
-            # Clean trailing backticks and markdown artifacts
-            if content.endswith('```'):
-                 content = content[:-3].strip()
-            
-            # Normalize path (remove leading/trailing slashes, cleanup)
-            path = path.replace('\\', '/').strip('/')
-            
-            if path and content:
-                files.append(GeneratedFile(path=path, content=content))
-        
-        # Fallback 1: Look for "File: path" or "Path: path"
-        if not files:
-            pattern_alt = r"(?:(?:File|Path|Target):\s*)([^\s\n]+).*\n(?:```[\w]*\n)(.*?)(?:```|$)"
-            matches_alt = re.finditer(pattern_alt, response, re.DOTALL | re.IGNORECASE)
-            for match in matches_alt:
-                path = match.group(1).strip().strip('/')
-                content = match.group(2).strip()
-                if content.endswith('```'): content = content[:-3].strip()
-                files.append(GeneratedFile(path=path, content=content))
-        
-        # Fallback 2: Heuristic path detection (lines starting with / or word/word)
-        if not files:
-            # If there's a code block and a short line right before it that looks like a path
-            pattern_heuristic = r"([a-zA-Z0-9._\-/]+\.[a-zA-Z0-9]+)\n(?:```[\w]*\n)(.*?)(?:```|$)"
-            matches_h = re.finditer(pattern_heuristic, response, re.DOTALL)
-            for match in matches_h:
-                path = match.group(1).strip()
-                content = match.group(2).strip()
-                if content.endswith('```'): content = content[:-3].strip()
-                files.append(GeneratedFile(path=path, content=content))
+# ── Provider health tracker (skips recently-failed providers) ─────────────────
+_health: dict[str, float] = {}   # provider → unix timestamp of last failure
+_COOLDOWN = 120                   # seconds to skip a provider after failure
 
-        # Absolute Fallback: Split by markdown blocks but TRY to grep for filename INSIDE the block or just before
-        if not files:
-            blocks = re.findall(r"```(.*?)\n(.*?)```", response, re.DOTALL)
-            for i, (info, block) in enumerate(blocks):
-                # Check if 'info' (the lang tag) actually contains a filename hint
-                if '.' in info and '/' not in info: # e.g. ```dockerfile:backend/Dockerfile
-                    filename = info.split(':')[-1].strip()
-                else:
-                    filename = "generated_file" if i == 0 else f"generated_file_{i}"
-                files.append(GeneratedFile(path=filename, content=block.strip()))
-                 
-        return files
+def _is_healthy(provider: str) -> bool:
+    last_fail = _health.get(provider, 0)
+    return (time.time() - last_fail) > _COOLDOWN
 
-def generate(task_type: str, context: dict) -> list[GeneratedFile]:
-    return LLMGenerator().generate(task_type, context)
+def _mark_failed(provider: str):
+    _health[provider] = time.time()
+    log.warning("Provider %s marked unhealthy for %ds", provider, _COOLDOWN)
+
+# ── Callers ───────────────────────────────────────────────────────────────────
+def _call_openai_compat(cfg, system, user, temperature, max_tokens, timeout):
+    from openai import OpenAI
+    client = OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
+    resp = client.chat.completions.create(
+        model=cfg["model"],
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        temperature=temperature, max_tokens=max_tokens, timeout=timeout,
+    )
+    return resp.choices[0].message.content.strip()
+
+def _call_gemini(cfg, system, user, temperature, max_tokens, timeout):
+    import google.generativeai as genai
+    genai.configure(api_key=cfg["api_key"])
+    model = genai.GenerativeModel(
+        model_name=cfg["model"],
+        system_instruction=system,
+        generation_config=genai.GenerationConfig(temperature=temperature, max_output_tokens=max_tokens),
+    )
+    return model.generate_content(user, request_options={"timeout": timeout}).text.strip()
+
+_CALLERS = {
+    "groq": _call_openai_compat, "nvidia": _call_openai_compat,
+    "cerebras": _call_openai_compat, "openrouter": _call_openai_compat,
+    "huggingface": _call_openai_compat, "gemini": _call_gemini,
+}
+
+# ── Public API ────────────────────────────────────────────────────────────────
+def call_llm(system_prompt: str, user_prompt: str, task_type: str = "default") -> str:
+    """
+    Call LLM with task-aware routing and full fallback chain.
+    task_type controls which provider is tried first.
+    Automatically skips providers that failed recently (cooldown window).
+    """
+    order       = _TASK_ROUTES.get(task_type, _TASK_ROUTES["default"])
+    temperature = float(_e("LLM_TEMPERATURE", "0.1"))
+    max_tokens  = int(_e("LLM_MAX_TOKENS",    "8192"))
+    timeout     = int(_e("LLM_TIMEOUT_SECONDS","45"))
+    max_retries = int(_e("LLM_MAX_RETRIES",   "3"))
+    cfg_map     = _cfg()
+    errors: list[str] = []
+
+    for provider in order:
+        cfg = cfg_map.get(provider, {})
+        if not cfg.get("api_key"):
+            log.debug("Skipping %s — no API key.", provider)
+            continue
+        if not _is_healthy(provider):
+            log.info("Skipping %s — in cooldown after recent failure.", provider)
+            continue
+
+        caller = _CALLERS.get(provider)
+        for attempt in range(1, max_retries + 1):
+            try:
+                log.info("LLM → %s [task=%s] attempt %d/%d", provider, task_type, attempt, max_retries)
+                result = caller(cfg, system_prompt, user_prompt, temperature, max_tokens, timeout)
+                log.info("LLM ✓ %s", provider)
+                return result
+            except Exception as exc:
+                wait = 2 ** attempt
+                msg = f"{provider} attempt {attempt}/{max_retries}: {exc}"
+                errors.append(msg)
+                log.warning("%s — retry in %ds", msg, wait)
+                if attempt < max_retries:
+                    time.sleep(wait)
+        _mark_failed(provider)
+
+    raise RuntimeError("All LLM providers failed:\n" + "\n".join(f"  • {e}" for e in errors))
