@@ -42,9 +42,16 @@ class IntegrityAuditor:
 
     def _check_port_consistency(self) -> List[Tuple[Severity, str]]:
         errors = []
-        for svc_name, svc in self.graph.nodes.items():
-            expected_port = svc.port
-            
+        for svc_name in self.graph.nodes:
+            # Use the ports dict — always valid regardless of how graph was built
+            port_str = self.graph.ports.get(svc_name)
+            if port_str is None:
+                continue
+            try:
+                expected_port = int(port_str)
+            except (ValueError, TypeError):
+                continue
+
             # Check Dockerfile
             dockerfile = self.artifacts.get(f"{svc_name}/Dockerfile") or self.artifacts.get("Dockerfile")
             if dockerfile:

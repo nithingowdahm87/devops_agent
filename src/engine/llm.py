@@ -33,7 +33,7 @@ def _e(k, d=""): return os.environ.get(k, d).strip()
 
 def _cfg(task_type="default"):
     # Task-specific model overrides
-    groq_model = "mixtral-8x7b-32768" if task_type == "heal" else "llama-3.3-70b-versatile"
+    groq_model = "llama-3.3-70b-versatile"  # mixtral-8x7b-32768 was decommissioned
     
     return {
         "groq":        {"api_key": _e("GROQ_API_KEY"),        "model": _e("GROQ_MODEL",        groq_model),                          "base_url": _BASES["groq"]},
