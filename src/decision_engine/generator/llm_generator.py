@@ -1,22 +1,24 @@
 from typing import Any, Dict
 from src.decision_engine.contracts.infra_spec import InfraSpec
 from src.utils.prompt_loader import render_prompt
+from src.engine.llm import call_llm
 
 class LLMGenerator:
     def __init__(self, client: Any, model_name: str):
         self.client = client
         self.model_name = model_name
         
-    def generate(self, prompt_template: str, context: Dict[str, Any]) -> InfraSpec:
+    def generate(self, prompt_template: str, context: Dict[str, Any], task_type: str = "default") -> InfraSpec:
         """
         Render prompt with context, call LLM, and return InfraSpec.
         """
         # 1. Render Prompt
         full_prompt = render_prompt(prompt_template, context)
+        system_prompt = "You are a Senior DevOps Engineer generating production-ready infrastructure code."
         
-        # 2. Call LLM
+        # 2. Call LLM (Overhaul 5 - Centrally Managed Routing)
         try:
-            raw_response = self.client.call(full_prompt)
+            raw_response = call_llm(system_prompt, full_prompt, task_type=task_type)
         except Exception as e:
             # If call fails even after retries, return empty or error spec
             return InfraSpec(

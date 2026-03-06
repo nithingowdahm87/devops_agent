@@ -64,13 +64,16 @@ class V2Orchestrator:
                 logger.warning(f"Failed to init {name} client: {e}. Using Mock.")
                 self.generators.append(LLMGenerator(MockClient(name=f"Mock-{name}"), f"Mock-{name}"))
         
-    def run_pipeline(self, project_path: str, context: ProjectContext, environment: str = "dev", no_llm: bool = False):
+    def run_pipeline(self, project_path: str, context: ProjectContext, environment: str = "dev", no_llm: bool = False, gitops: bool = False, gitops_repo: str = None, target_service: str = None):
         """
         Main entry point for V2 Pipeline.
         """
-        logger.info("🚀 Starting V2 Decision Engine Pipeline")
+        logger.info("🚀 Starting V2 Decision Engine Pipeline | GitOps=%s", gitops)
         self.memory = LongTermMemory(project_path)
-
+        
+        # 0. GitOps Setup (New)
+        if gitops and gitops_repo:
+            self._setup_gitops_repo(project_path, gitops_repo)
         
         # 1. Plan Architecture
         plan = self.planner.create_plan(context)
@@ -174,28 +177,51 @@ class V2Orchestrator:
         print("=" * W + "\n")
 
 
-        # 3. Execute Stages based on Plan
+        # 3. Discover and Isolate Contexts (Overhaul 1)
+        services = context.microservice_dirs
+        if target_service:
+            services = [target_service] if target_service in services else []
+            print(f"🎯 Target Service Filter: {target_service} (Found: {len(services) > 0})")
 
-        # --- STAGE: Scan & Observability (NEW) ---
-        # self._execute_stage("Scan & Observability", "scan", project_path, context, plan)
-
+        per_service_contexts = {}
+        for svc in services:
+            print(f"🔍 Isolating Context: {svc}")
+            per_service_contexts[svc] = self._isolate_context(context, svc)
 
         # 6. Run Stages (Level 10 Deterministic Sequence)
         all_artifacts = {}
-        for stage in ["dockerfile", "docker_compose", "kubernetes", "cicd"]:
-             try:
-                 res_files = self._execute_stage(stage.replace("_", " "), stage, project_path, context, plan, environment=environment, no_llm=no_llm)
-                 if res_files:
-                     for f in res_files:
-                         all_artifacts[f.path] = f.content
-             except Exception as stage_e:
-                 logger.error("Stage %s failed: %s", stage, stage_e)
-                 print(f"⚠️  Stage {stage} failed due to LLM exhaustion. Generating minimal fallback...")
-                 if stage == "kubernetes":
-                     # Create a dummy manifest to prevent downstream crashes
-                     all_artifacts["k8s/fallback.yaml"] = "# Fallback Kubernetes Manifest\n# Manual generation required."
-                 elif stage == "cicd":
-                     all_artifacts[".github/workflows/fallback.yml"] = "# Fallback CI/CD\n# Manual generation required."
+        stages = ["dockerfile", "docker_compose", "kubernetes"]
+        if gitops:
+            stages += ["github_actions", "gitops_manifests", "secrets_doc"]
+        else:
+            stages.append("cicd")
+
+        for stage in stages:
+            if stage in ["dockerfile", "github_actions"]:
+                # Per-service execution (Fixes Overhaul 2)
+                for svc in services:
+                    try:
+                        svc_ctx = per_service_contexts[svc]
+                        res_files = self._execute_stage(f"{stage.replace('_', ' ')} ({svc})", stage, project_path, svc_ctx, plan, environment=environment, no_llm=no_llm, service_name=svc)
+                        if res_files:
+                            for f in res_files:
+                                all_artifacts[f.path] = f.content
+                    except Exception as e:
+                        logger.error(f"Stage {stage} for {svc} failed: {e}")
+            else:
+                # Project-wide execution (Compose, K8s, GitOps manifests, Secrets)
+                try:
+                    res_files = self._execute_stage(stage.replace("_", " "), stage, project_path, context, plan, environment=environment, no_llm=no_llm)
+                    if res_files:
+                        for f in res_files:
+                            all_artifacts[f.path] = f.content
+                except Exception as stage_e:
+                    logger.error("Stage %s failed: %s", stage, stage_e)
+                    print(f"⚠️  Stage {stage} failed due to LLM exhaustion. Generating minimal fallback...")
+                    if stage == "kubernetes":
+                         all_artifacts["k8s/fallback.yaml"] = "# Fallback Kubernetes Manifest\n# Manual generation required."
+                    elif stage == "cicd":
+                         all_artifacts[".github/workflows/fallback.yml"] = "# Fallback CI/CD\n# Manual generation required."
 
 
         # 7. Level 10 Post-Generation Stage (Audit & Manifest)
@@ -236,7 +262,7 @@ class V2Orchestrator:
         sys.exit(0)
 
         
-    def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan, environment: str = "dev", no_llm: bool = False):
+    def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan, environment: str = "dev", no_llm: bool = False, service_name: str = None):
         print(f"\n--- Stage: {display_name} ---")
         
         # 1. Load Prompts
@@ -246,7 +272,10 @@ class V2Orchestrator:
             "kubernetes": ("k8s", "k8s_production"),
             "cicd": ("cicd", "cicd_production"),
             "scan": ("debug", "healer"), # Simplified
-            "docker_compose": ("docker", "docker_compose")
+            "docker_compose": ("docker", "docker_compose"),
+            "github_actions": ("cicd", "github_actions"),
+            "gitops_manifests": ("k8s", "argocd"),
+            "secrets_doc": ("docs", "secrets")
         }
         
         prompt_dir, prompt_name = prompt_map.get(stage_key, (stage_key, "writer_a"))
@@ -352,7 +381,7 @@ class V2Orchestrator:
         else:
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                futures = [executor.submit(g.generate, template, prompt_context) for g in self.generators]
+                futures = [executor.submit(g.generate, template, prompt_context, task_type=stage_key) for g in self.generators]
                 for f in concurrent.futures.as_completed(futures):
                     try:
                         candidates.append(f.result())
@@ -462,6 +491,16 @@ class V2Orchestrator:
                 
                 for rel_path, f_content in matches:
                     rel_path = rel_path.strip()
+                    # ─── New Tiered Output Structure (Overhaul 10) ──────────
+                    if service_name:
+                        rel_path = f"outputs/per-service/{service_name}/{rel_path}"
+                    elif stage_key == "docker_compose":
+                        rel_path = f"outputs/shared/{rel_path}"
+                    elif stage_key == "gitops_manifests":
+                        rel_path = f"outputs/shared/gitops/{rel_path}"
+                    else:
+                        rel_path = f"outputs/docs/{rel_path}" if "doc" in stage_key else f"outputs/shared/{rel_path}"
+                        
                     # ← BUG FIX: guard against LLM embedding YAML in filename token
                     if len(rel_path) > 255 or "\n" in rel_path:
                         logger.warning(
@@ -501,6 +540,16 @@ class V2Orchestrator:
                     "kubernetes":    "k8s/manifests.yaml",
                 }
                 filename = filename_map.get(stage_key, "generated_file")
+                
+                # ─── New Tiered Output Structure (Overhaul 10) ──────────
+                if service_name:
+                    filename = f"outputs/per-service/{service_name}/{filename}"
+                elif stage_key == "docker_compose":
+                    filename = f"outputs/shared/{filename}"
+                elif stage_key == "gitops_manifests":
+                    filename = f"outputs/shared/gitops/{filename}"
+                else:
+                    filename = f"outputs/docs/{filename}" if "doc" in stage_key else f"outputs/shared/{filename}"
                 
                 gen_file = GeneratedFile(path=filename, content=final_content)
                 val_res = self.validator.validate(gen_file)
@@ -566,5 +615,53 @@ class V2Orchestrator:
         else:
             print("⚠️ No referenced files found in content. Dumping raw to 'scan_configs.md'")
             write_file(os.path.join(project_path, "scan_configs.md"), content)
+
+    def _isolate_context(self, base_context: ProjectContext, service_name: str) -> ProjectContext:
+        """Creates a service-specific context with dedicated resource profiles."""
+        import copy
+        ctx = copy.deepcopy(base_context)
+        
+        # Filter details for ONLY this service
+        svc_detail = base_context.microservice_details.get(service_name, {})
+        svc_type = svc_detail.get("language", "unknown").lower()
+        if "spring boot" in str(svc_detail.get("frameworks", [])).lower():
+            svc_type = "java-spring-boot"
+        elif "fastapi" in str(svc_detail.get("frameworks", [])).lower():
+            svc_type = "python-fastapi"
+        elif "react" in str(svc_detail.get("frameworks", [])).lower() or "nginx" in str(svc_detail.get("base_image", "")).lower():
+            svc_type = "react-nginx"
+            
+        # Dynamic Resource Allocation (Overhaul 4)
+        RESOURCE_PROFILES = {
+            'java-spring-boot': {'cpu_req': '250m', 'cpu_lim': '500m', 'mem_req': '512Mi', 'mem_lim': '1Gi'},
+            'python-fastapi': {'cpu_req': '100m', 'cpu_lim': '300m', 'mem_req': '256Mi', 'mem_lim': '512Mi'},
+            'react-nginx': {'cpu_req': '50m', 'cpu_lim': '250m', 'mem_req': '128Mi', 'mem_lim': '512Mi'},
+            'default': {'cpu_req': '100m', 'cpu_lim': '200m', 'mem_req': '128Mi', 'mem_lim': '256Mi'}
+        }
+        
+        profile = RESOURCE_PROFILES.get(svc_type, RESOURCE_PROFILES['default'])
+        
+        # Inject into context (Dynamic Resource Logic)
+        ctx.project_name = service_name
+        ctx.language = svc_detail.get("language", "unknown")
+        ctx.ports = svc_detail.get("ports", ["8080"])
+        ctx.frameworks = svc_detail.get("frameworks", [])
+        
+        # Add a custom 'metadata' field for resource profiles
+        ctx.raw_context_summary = f"Isolated Context for {service_name}\nResources: {profile}\nOriginal context follows:\n{ctx.raw_context_summary}"
+        
+        return ctx
+
+    def _setup_gitops_repo(self, project_path: str, repo_url: str):
+        """Detects or initializes GitOps repository structure (Overhaul 6)."""
+        import os
+        gitops_dir = os.path.join(project_path, "gitops-repo")
+        if not os.path.exists(gitops_dir):
+            print(f"✨ Creating GitOps structural tree in {gitops_dir}...")
+            os.makedirs(os.path.join(gitops_dir, "argocd"), exist_ok=True)
+            os.makedirs(os.path.join(gitops_dir, "namespaces"), exist_ok=True)
+            # Minimal README/Structure
+            with open(os.path.join(gitops_dir, "README.md"), "w") as f:
+                f.write("# GitOps Repository\nManaged by UrbanOps Agent v12.0")
 
 

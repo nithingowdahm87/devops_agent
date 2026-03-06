@@ -12,6 +12,7 @@ _BASES = {
     "cerebras":    "https://api.cerebras.ai/v1",
     "openrouter":  "https://openrouter.ai/api/v1",
     "huggingface": "https://router.huggingface.co/hf-inference/v1",
+    "openai":      "https://api.openai.com/v1",
 }
 
 # ── Task-based model routing ──────────────────────────────────────────────────
@@ -38,6 +39,7 @@ def _cfg(task_type="default"):
         "cerebras":    {"api_key": _e("CEREBRAS_API_KEY"),    "model": _e("CEREBRAS_MODEL",    "llama-3.1-70b-versatile"),           "base_url": _BASES["cerebras"]},
         "openrouter":  {"api_key": _e("OPENROUTER_API_KEY"),  "model": _e("OPENROUTER_MODEL",  "anthropic/claude-3.5-sonnet"),       "base_url": _BASES["openrouter"]},
         "huggingface": {"api_key": _e("HUGGINGFACE_TOKEN"),   "model": _e("HUGGINGFACE_MODEL", "mistralai/Mistral-7B-Instruct-v0.3"),"base_url": _BASES["huggingface"]},
+        "openai":      {"api_key": _e("OPENAI_API_KEY"),       "model": _e("OPENAI_MODEL",      "gpt-4o-mini"),                       "base_url": _BASES["openai"]},
     }
 
 # ── Provider health tracker (skips recently-failed providers) ─────────────────
@@ -80,7 +82,7 @@ _CALLERS = {
 }
 
 # ── Public API ────────────────────────────────────────────────────────────────
-def call_llm(system_prompt: str, user_prompt: str, task_type: str = "default") -> str:
+def call_llm(system_prompt: str, user_prompt: str, task_type: str = "default", max_tokens_budget: int = 2048) -> str:
     """
     Call LLM with task-aware routing and full fallback chain.
     task_type controls which provider is tried first.
@@ -88,14 +90,10 @@ def call_llm(system_prompt: str, user_prompt: str, task_type: str = "default") -
     """
     order       = _TASK_ROUTES.get(task_type, _TASK_ROUTES["default"])
     temperature = float(_e("LLM_TEMPERATURE", "0.1"))
-    max_tokens  = int(_e("LLM_MAX_TOKENS",    "8192"))
+    max_tokens  = max_tokens_budget # Override global with specific budget
     timeout     = int(_e("LLM_TIMEOUT_SECONDS","45"))
     max_retries = int(_e("LLM_MAX_RETRIES",   "3"))
     
-    # Healing tasks need aggressive token budgeting to prevent TPD 429 errors
-    if task_type == "heal":
-        max_tokens = min(max_tokens, 2048)
-        
     cfg_map     = _cfg(task_type)
     errors: list[str] = []
 

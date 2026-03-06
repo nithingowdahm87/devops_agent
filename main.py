@@ -584,6 +584,9 @@ def main():
     parser.add_argument("--env", type=str, default="dev", help="Environment (dev, staging, prod)")
     parser.add_argument("--strict", action="store_true", help="Enable strict policy mode")
     parser.add_argument("--no-llm", action="store_true", help="Force deterministic fallback mode")
+    parser.add_argument("--gitops", action="store_true", help="Enable GitOps mode (per-service CI & manifests)")
+    parser.add_argument("--gitops-repo", type=str, help="GitOps repository URL or path")
+    parser.add_argument("--service", type=str, help="Target a specific microservice only")
     parser.add_argument("path", type=str, nargs="?", help="Project path")
     args = parser.parse_args()
 
@@ -620,7 +623,15 @@ def main():
         
         if choice == '1':
             orchestrator = V2Orchestrator()
-            orchestrator.run_pipeline(project_path, context, environment=args.env, no_llm=args.no_llm)
+            orchestrator.run_pipeline(
+                project_path, 
+                context, 
+                environment=args.env, 
+                no_llm=args.no_llm,
+                gitops=args.gitops,
+                gitops_repo=args.gitops_repo,
+                target_service=args.service
+            )
         elif choice == '2':
             run_manual_menu(project_path, context, audit, publisher, run_id)
         elif choice == 'q':
