@@ -401,13 +401,10 @@ class V2Orchestrator:
                         logger.error(f"Generator failed: {e}")
 
         # 3. Score & Select
-        # We need to simulate scoring. Real scoring needs static analysis (hadolint, kubeconform).
-        # For this prototype, we will simplistic random/heuristic scoring 
-        # OR we just implement basic length/keyword checks in 'Scorecard' if possible.
-        # WE haven't implemented REAL scoring in scorecard.py yet, it just takes the spec's self-reported score.
-        # So we must "grade" them here or assume the Generator does it? Generator doesn't know.
-        # Let's add a "Grader" step? 
-        # For now, we will assign mock scores to test the flow.
+        # TODO: Real scoring needs static analysis (hadolint, kubeconform, trivy).
+        # Currently, the `scorecard.py` logic relies on the LLM Generator's self-reported spec score.
+        # So we inject a "Grader" heuristic here.
+        # Long-term goal: pipe real static linters directly into Evaluator to drive true objective selection.
         for c in candidates:
             content = c.file_content.lower()
             # --- Security & Quality heuristics (0-100) ---
@@ -568,7 +565,7 @@ class V2Orchestrator:
                     "docker_compose":  "docker-compose.yml",
                     "dockerfile":      "Dockerfile",
                     "kubernetes":      "k8s/manifests.yaml",
-                    "gitops_manifests":"gitops/applicationset.yaml",
+                    "gitops_manifests":"applicationset.yaml",
                     "secrets_doc":     "docs/secrets.md",
                 }
                 filename = filename_map.get(stage_key, "generated_file")

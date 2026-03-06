@@ -17,7 +17,7 @@ Codebase Input
 ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ Stage 2 — LLM Router (Deterministic Fallback)              │
-│ Groq → Gemini → Cerebras → OpenAI → NVIDIA → OpenRouter    │
+│ Groq → OpenRouter → Gemini → Cerebras → NVIDIA → HuggingFace → OpenAI│
 └────────────────────────┬────────────────────────────────────┘
 │
 ▼
@@ -47,11 +47,12 @@ The agent uses a **fallback loop** — if the primary provider fails or times ou
 | Provider | Env Var | Default Model | Speed |
 |---|---|---|---|
 | Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Fastest |
+| OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-3.5-sonnet` | Fast |
 | Gemini | `GOOGLE_API_KEY` | `gemini-2.0-flash` | Fast |
 | Cerebras | `CEREBRAS_API_KEY` | `llama-3.1-70b-versatile` | Fast |
-| OpenAI | `OPENAI_API_KEY` | `gpt-4o-mini` | Stable |
 | NVIDIA NIM | `NVIDIA_API_KEY` | `meta/llama-3.1-70b-instruct` | Medium |
-| OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-3.5-sonnet` | Medium |
+| HuggingFace | `HUGGINGFACE_TOKEN` | `mistralai/Mistral-7B-Instruct-v0.3` | Medium |
+| OpenAI | `OPENAI_API_KEY` | `gpt-4o-mini` | Stable |
 
 You do not need all six keys — any single key is enough to run the agent. Having multiple keys gives you automatic failover and zero downtime when one provider has an outage.
 

@@ -10,7 +10,7 @@ You are a Senior SRE. Generate ArgoCD manifests and supporting Kubernetes resour
 ### RULE 2 — App-of-Apps Pattern
 - Generate an `ApplicationSet` named `{{ project_name }}-apps`.
 - Use the `git` generator pointing to the GitOps repository.
-- Path MUST be `apps/{{ project_name }}`.
+- Path MUST be `apps/*`.
 - Enable `selfHeal: true` and `prune: true`.
 
 ### RULE 3 — Resource Quotas & Pinned Images
