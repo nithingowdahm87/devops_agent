@@ -111,16 +111,22 @@ class IntegrityAuditor:
         errors = []
         for svc_name in self.graph.nodes:
             # For path-style names like 'backend_java/auth_service', also check basename
-            search_names = {svc_name}
-            if "/" in svc_name:
-                search_names.add(svc_name.split("/")[-1])
+            basename = svc_name.split("/")[-1] if "/" in svc_name else svc_name
+            search_names = {svc_name, basename}
 
             found = False
             for path, content in self.artifacts.items():
-                if "k8s/" in path:
-                    if any(name in content for name in search_names):
-                        found = True
-                        break
+                if "k8s/" not in path:
+                    continue
+                # Primary: check if service name appears in the artifact PATH
+                if any(name in path for name in search_names):
+                    found = True
+                    break
+                # Secondary: check if name appears in the YAML content
+                if any(name in content for name in search_names):
+                    found = True
+                    break
             if not found:
                 errors.append((Severity.MEDIUM, f"NAME_DRIFT: Service '{svc_name}' not found in any K8s manifests."))
         return errors
+
