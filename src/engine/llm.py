@@ -100,7 +100,7 @@ def call_llm(system_prompt: str, user_prompt: str, task_type: str = "default", m
     temperature = float(_e("LLM_TEMPERATURE", "0.1"))
     
     # Safely compute token limits, respecting the specific task budget overrides
-    env_max = int(os.environ.get("LLM_MAX_TOKENS", "2048"))
+    env_max = int(os.environ.get("LLM_MAX_TOKENS", "1024"))
     max_tokens  = min(max_tokens_budget, env_max)
     
     timeout     = int(_e("LLM_TIMEOUT_SECONDS","45"))

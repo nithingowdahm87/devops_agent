@@ -110,12 +110,17 @@ class IntegrityAuditor:
     def _check_service_names(self) -> List[Tuple[Severity, str]]:
         errors = []
         for svc_name in self.graph.nodes:
-            # Check if any k8s file mentions the service name
+            # For path-style names like 'backend_java/auth_service', also check basename
+            search_names = {svc_name}
+            if "/" in svc_name:
+                search_names.add(svc_name.split("/")[-1])
+
             found = False
             for path, content in self.artifacts.items():
-                if "k8s/" in path and svc_name in content:
-                    found = True
-                    break
+                if "k8s/" in path:
+                    if any(name in content for name in search_names):
+                        found = True
+                        break
             if not found:
                 errors.append((Severity.MEDIUM, f"NAME_DRIFT: Service '{svc_name}' not found in any K8s manifests."))
         return errors
