@@ -96,11 +96,17 @@ cp .env.example .env
 ```
 
 ## GitOps Mode
-When `--gitops` is enabled, the agent:
+When `--gitops` is enabled, the agent orchestrates a full GitOps transformation:
 1. **Per-Service CI**: Generates `.github/workflows/{{svc}}-ci.yml` with scoped path triggers.
 2. **ArgoCD Support**: Generates `ApplicationSet` and namespaced Kubernetes files.
 3. **Multi-Repo Sync**: Clones/Pulls the `--gitops-repo` and automatically creates PRs or commits if `GITHUB_TOKEN` is present.
 4. **Isolated Context**: Each service receives its own resource profile (CPU/RAM) and metadata.
+
+### Required Secrets for GitOps automation
+To fully utilize the V2 proactive PR integration and CI workflows, ensure these environment variables are set during generation, or added to your actual target repository:
+- `GITHUB_TOKEN`: For the agent to automatically push to the GitOps repo and open a PR.
+- `GITHUB_REPO`: The target repo for the GitOps state (e.g. `your-username/my-infra-repo`).
+- `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`: Required by the generated CI actions to publish your built images.
 
 ## Directory Hierarchy
 Generated files are organized in `outputs/` to support monorepos cleanly:

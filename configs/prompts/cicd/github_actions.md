@@ -39,7 +39,7 @@ on:
 ### RULE 5 — GitOps Manifest Update (CRITICAL)
 - After pushing the image, update the image tag in the GitOps repository.
 - Clone the GitOps repo (separate from app repo).
-- Use `sed` to update `apps/{{ project_name }}/deployment.yaml`.
+- Use `sed` to update `apps/{{ svc_name }}/deployment.yaml`.
 - Commit and push to the GitOps repo.
 
 ---
