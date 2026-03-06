@@ -81,10 +81,24 @@ class GitOpsPublisher:
         Returns:
             {"mode": "pr", "url": pr_url} or {"mode": "local", "paths": [...]}
         """
+        # ─── Semantic Polish 10 Target Rewriting ────────
+        # If this is GitHub Actions from the orchestrator, it's currently structured as:
+        # "outputs/per-service/<svc_name>/.github/workflows/<svc>-ci.yml"
+        # We must rewrite this to target the actual root ".github/workflows/" of the repo.
+        publish_files = {}
+        for fpath, content in files.items():
+            out_path = fpath
+            if stage == "github_actions" and ".github/workflows/" in fpath:
+                # Strip everything before .github/workflows/
+                parts = fpath.split(".github/workflows/")
+                if len(parts) > 1:
+                    out_path = f".github/workflows/{parts[-1]}"
+            publish_files[out_path] = content
+
         if self.mode == "pr":
-            return self._publish_pr(files, stage, run_id, reasoning)
+            return self._publish_pr(publish_files, stage, run_id, reasoning)
         else:
-            return self._publish_local(files, project_path)
+            return self._publish_local(publish_files, project_path)
 
     # ─── GitHub PR Path ──────────────────────────────────────────
 

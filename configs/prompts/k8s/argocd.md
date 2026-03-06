@@ -15,7 +15,7 @@ You are a Senior SRE. Generate ArgoCD manifests and supporting Kubernetes resour
 
 ### RULE 3 — Resource Quotas & Pinned Images
 - Use the provided JSON map `resource_profiles` to set `limits` and `requests` for each service. Do NOT invent values.
-- Images MUST be pinned using `${GIT_COMMIT_SHA}` or equivalent variable.
+- Images MUST be pinned to a concrete immutable tag. Use a placeholder tag that GitHub Actions will replace (for example `myuser/{{ svc_name }}:PLACEHOLDER_TAG`).
 
 ### RULE 4 — Probes
 - Every Deployment MUST have liveness, readiness, and startup probes.

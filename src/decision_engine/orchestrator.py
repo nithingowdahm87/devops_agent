@@ -747,8 +747,16 @@ class V2Orchestrator:
             except Exception: pass
 
             # Minimal README/Structure
+            readme_content = (
+                "# GitOps Repository\n"
+                "Managed by UrbanOps Agent v12.0\n\n"
+                "## Directory Layout\n"
+                "- `argocd/applicationset.yaml`: The master App-of-Apps generator mapping to `apps/*`.\n"
+                "- `namespaces/`: Contains the isolated `<svc_name>.yaml` Namespace declarations.\n"
+                "- `apps/<svc_name>/`: Contains the specific `deployment.yaml`, `service.yaml`, and `hpa.yaml` definitions per service.\n"
+            )
             with open(os.path.join(gitops_dir, "README.md"), "w") as f:
-                f.write("# GitOps Repository\nManaged by UrbanOps Agent v12.0")
+                f.write(readme_content)
         
         # Ensure standard folders exist
         os.makedirs(os.path.join(gitops_dir, "argocd"), exist_ok=True)
