@@ -287,7 +287,7 @@ class V2Orchestrator:
             logger.warning(f"Failed to load prompt {prompt_dir}/{prompt_name}: {e}. Falling back to elite defaults.")
             # Final fallback to known elite prompts
             if "docker" in stage_key: template = load_prompt("docker", "docker_production")
-            elif "k8s" in stage_key or "kubernetes" in stage_key: template = load_prompt("k8s", "k8s_production")
+            elif "k8s" in stage_key or "kubernetes" in stage_key or "gitops" in stage_key: template = load_prompt("k8s", "k8s_production")
             elif "ci" in stage_key: template = load_prompt("cicd", "cicd_production")
             else: raise FileNotFoundError(f"Could not find any prompt for stage: {stage_key}")
             
@@ -357,6 +357,16 @@ class V2Orchestrator:
                 "matching the Deployment name. DO NOT put 'selector' in spec root of HPA.\n"
                 "Use FILENAME: k8s/<svc>/<file>.yaml format."
             )
+            
+        if stage_key == "kubernetes" and getattr(context, "resources", None):
+            template += (
+                f"\n\nCRITICAL: Use these container resources exactly:\n"
+                f"requests.cpu: {context.resources.get('cpu_req', '250m')}\n"
+                f"requests.memory: {context.resources.get('mem_req', '256Mi')}\n"
+                f"limits.cpu: {context.resources.get('cpu_lim', '500m')}\n"
+                f"limits.memory: {context.resources.get('mem_lim', '512Mi')}\n"
+            )
+
         
         candidates = []
         if no_llm:

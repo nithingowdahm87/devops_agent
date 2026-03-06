@@ -77,6 +77,7 @@ resources:
     cpu: "500m"
     memory: "512Mi"
 ```
+**CRITICAL EXCEPTION:** If the context includes dynamic resources (cpu_req, cpu_lim, mem_req, mem_lim), you MUST explicitly use those values instead of these defaults!
 Never omit — pods without limits are evicted first under pressure.
 
 ### RULE 6 — All 3 Probes (MANDATORY — never omit any)

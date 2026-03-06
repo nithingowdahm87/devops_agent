@@ -25,22 +25,17 @@ on:
 
 ### RULE 2 — Environment Setup
 - Detect runtime and use appropriate setup action (setup-java, setup-node, setup-python).
-- Use `{{ language }}` as the primary hint.
 
-### RULE 3 — Build and Test
-- Run `cd {{ service_path }}` before any build/test commands.
-- Use standard build commands (mvn test, npm test, pytest).
+### RULE 3 — Build, Test & Docker Push
+- Run `cd {{ service_path }}` before commands.
+- Use `docker/build-push-action@v6`. Context MUST be {{ service_path }}.
+- Tag image exactly as: `${{ secrets.DOCKERHUB_USERNAME }}/{{ svc_name }}:${{ github.sha }}` AND `${{ secrets.DOCKERHUB_USERNAME }}/{{ svc_name }}:latest`.
 
-### RULE 4 — Docker Build & Push
-- Use `docker/build-push-action@v6`.
-- Context MUST be `{{ service_path }}`.
-- Tag with `${{ github.sha }}` and `latest`.
-
-### RULE 5 — GitOps Manifest Update (CRITICAL)
-- After pushing the image, update the image tag in the GitOps repository.
-- Clone the GitOps repo (separate from app repo).
-- Use `sed` to update `apps/{{ svc_name }}/deployment.yaml`.
-- Commit and push to the GitOps repo.
+### RULE 4 — GitOps Manifest Update (CRITICAL)
+- After pushing the image, you MUST update the GitOps repository.
+- Use `actions/checkout@v4` to clone the GitOps repo into `gitops-repo/`. Provide `${{ secrets.GITOPS_TOKEN }}`.
+- Use `sed` to replace the generic image tag in `apps/{{ svc_name }}/deployment.yaml` with the new SHA. Focus strictly on matching the `image: ` line.
+- Commit the change and `git push` back to the GitOps repo automatically.
 
 ---
 
