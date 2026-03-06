@@ -16,6 +16,7 @@ import os
 import time
 import logging
 import socket
+import random
 
 log = logging.getLogger(__name__)
 
@@ -116,7 +117,7 @@ def call_llm(
     env_max = int(os.environ.get("LLM_MAX_TOKENS", "1024"))
     max_tokens = min(max_tokens_budget, env_max)
 
-    timeout = int(_e("LLM_TIMEOUT_SECONDS", "45"))
+    timeout = int(_e("LLM_TIMEOUT_SECONDS", "120"))
     max_retries = int(_e("LLM_MAX_RETRIES", "3"))
 
     cfg_map = _cfg(task_type)
@@ -146,10 +147,10 @@ def call_llm(
             log.info("LLM ✓ %s", provider)
             return result
         except Exception as exc:
-            wait = 2 ** attempt
+            wait = (2 ** attempt) + random.uniform(0, 5)  # jitter
             msg = f"{provider} attempt {attempt}/{max_retries}: {exc}"
             errors.append(msg)
-            log.warning("%s — retry in %ds", msg, wait)
+            log.warning("%s — retry in %.1fs", msg, wait)
             if attempt < max_retries:
                 time.sleep(wait)
 

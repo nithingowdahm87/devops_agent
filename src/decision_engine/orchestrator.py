@@ -413,14 +413,13 @@ class V2Orchestrator:
                     reasoning: str = "Hardware-locked deterministic fallback"
                 candidates.append(MockCandidate(file_content=content))
         else:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                futures = [executor.submit(g.generate, template, prompt_context, task_type=stage_key) for g in self.generators]
-                for f in concurrent.futures.as_completed(futures):
-                    try:
-                        candidates.append(f.result())
-                    except Exception as e:
-                        logger.error(f"Generator failed: {e}")
+            # Sequential execution — Ollama processes requests one at a time;
+            # parallel calls just queue up and timeout on 8 GB RAM machines.
+            for g in self.generators:
+                try:
+                    candidates.append(g.generate(template, prompt_context, task_type=stage_key))
+                except Exception as e:
+                    logger.error(f"Generator failed: {e}")
 
         # 3. Score & Select
         # TODO: Objective Static Analysis Roadmap

@@ -4,6 +4,11 @@ export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
 export PYTHONIOENCODING=utf-8
 
+# Ollama tuning for 8 GB RAM machines
+export OLLAMA_NUM_PARALLEL=1        # prevent concurrent model loading
+export OLLAMA_MAX_LOADED_MODELS=1   # only keep 1 model in VRAM/RAM
+export OLLAMA_KEEP_ALIVE=10m        # keep model warm, avoid reload delays
+
 # Navigate to the script's directory (devops_agent root)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "$SCRIPT_DIR"
