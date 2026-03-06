@@ -324,8 +324,9 @@ class V2Orchestrator:
             
         # 2. Generate Drafts (Parallel)
         prompt_context = {
-            "context": context.raw_context_summary,  # Or structured data? format() needs string usually, or we pass dict unpacking
-            "plan_summary": str(plan) # Pass plan details to the prompt!
+            "context": context.raw_context_summary,
+            "plan_summary": str(plan),
+            "svc_name": service_name or getattr(context, "project_name", "unknown")
         }
         # Add specific fields
         prompt_context.update(context.model_dump())
@@ -500,7 +501,8 @@ class V2Orchestrator:
                     elif stage_key == "gitops_manifests":
                         # Strip redundant 'gitops/' prefix if prompt generated it (Phase 3 Polish)
                         clean_path = rel_path[7:] if rel_path.startswith("gitops/") else rel_path
-                        rel_path = f"outputs/shared/gitops/{clean_path}"
+                        # Map directly to the canonical gitops-repo layout (Phase 5 Polish)
+                        rel_path = f"gitops-repo/{clean_path}"
                     else:
                         rel_path = f"outputs/docs/{rel_path}" if "doc" in stage_key else f"outputs/shared/{rel_path}"
                         

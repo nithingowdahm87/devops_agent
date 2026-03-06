@@ -17,13 +17,14 @@ _BASES = {
 
 # ── Task-based model routing ──────────────────────────────────────────────────
 # Each task type gets the best provider first, then falls back automatically.
+# Gemini is intentionally demoted behind Groq and OpenRouter until fully migrated to google.genai
 _TASK_ROUTES = {
-    "docker":      ["groq",       "gemini",  "cerebras", "nvidia", "openrouter", "huggingface"],
-    "k8s":         ["groq",       "gemini",  "cerebras", "nvidia", "openrouter", "huggingface"],
-    "ci":          ["openrouter", "gemini",  "groq",     "nvidia", "cerebras",   "huggingface"],
-    "heal":        ["gemini",     "groq",    "cerebras", "nvidia", "openrouter", "huggingface"],
-    "critique":    ["openrouter", "gemini",  "groq",     "nvidia", "cerebras",   "huggingface"],
-    "default":     ["groq",       "gemini",  "cerebras", "nvidia", "openrouter", "huggingface"],
+    "docker":      ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface"],
+    "k8s":         ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface"],
+    "ci":          ["openrouter", "groq",       "gemini",  "nvidia", "cerebras",   "huggingface"],
+    "heal":        ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface"],
+    "critique":    ["openrouter", "groq",       "gemini",  "nvidia", "cerebras",   "huggingface"],
+    "default":     ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface"],
 }
 
 def _e(k, d=""): return os.environ.get(k, d).strip()
@@ -90,7 +91,11 @@ def call_llm(system_prompt: str, user_prompt: str, task_type: str = "default", m
     """
     order       = _TASK_ROUTES.get(task_type, _TASK_ROUTES["default"])
     temperature = float(_e("LLM_TEMPERATURE", "0.1"))
-    max_tokens  = max_tokens_budget # Override global with specific budget
+    
+    # Safely compute token limits, respecting the specific task budget overrides
+    env_max = int(os.environ.get("LLM_MAX_TOKENS", "2048"))
+    max_tokens  = min(max_tokens_budget, env_max)
+    
     timeout     = int(_e("LLM_TIMEOUT_SECONDS","45"))
     max_retries = int(_e("LLM_MAX_RETRIES",   "3"))
     
