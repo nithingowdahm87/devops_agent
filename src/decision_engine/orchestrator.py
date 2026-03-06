@@ -263,7 +263,7 @@ class V2Orchestrator:
         sys.exit(0)
 
         
-    def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan, environment: str = "dev", no_llm: bool = False, service_name: str = None):
+    def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan, environment: str = "dev", no_llm: bool = False, service_name: str = None, no_prompts: bool = False):
         print(f"\n--- Stage: {display_name} ---")
         
         # 1. Load Prompts
@@ -303,7 +303,11 @@ class V2Orchestrator:
                 dirs = ", ".join(context.microservice_dirs)
                 template += f"\n\nCRITICAL: Automatically output EACH Dockerfile in its respective directory using the FILENAME format (e.g., frontend/Dockerfile, backend/Dockerfile). These are the required directories to cover: {dirs}\nFILENAME: <dir>/Dockerfile\n```dockerfile\n<content>\n```"
             else:
-                user_input = input(f"Would you like to provide custom instructions for {display_name}? [y/N]: ").strip().lower()
+                if no_prompts:
+                    user_input = "n"
+                else:
+                    user_input = input(f"Would you like to provide custom instructions for {display_name}? [y/N]: ").strip().lower()
+                    
                 if user_input in ['y', 'yes']:
                     print("Options for Custom Instructions:")
                     print("  1. Type instructions directly")
@@ -401,10 +405,13 @@ class V2Orchestrator:
                         logger.error(f"Generator failed: {e}")
 
         # 3. Score & Select
-        # TODO: Real scoring needs static analysis (hadolint, kubeconform, trivy).
-        # Currently, the `scorecard.py` logic relies on the LLM Generator's self-reported spec score.
-        # So we inject a "Grader" heuristic here.
-        # Long-term goal: pipe real static linters directly into Evaluator to drive true objective selection.
+        # TODO: Objective Static Analysis Roadmap
+        # Currently, the Evaluator relies on the LLM's self-reported scores and length heuristics.
+        # To make this fully deterministic, the future roadmap includes wiring real CLI linters:
+        # 1. Run `hadolint` (Docker) or `kubeconform` (K8s) on `c.file_content` via a secure subprocess.
+        # 2. Parse the exit code or JSON output to quantify real technical debt.
+        # 3. Pipe those integers directly into python `scorecard.py` to drive true objective selection.
+        # For now, we inject a semantic "Grader" heuristic here.
         for c in candidates:
             content = c.file_content.lower()
             # --- Security & Quality heuristics (0-100) ---

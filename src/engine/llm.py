@@ -67,14 +67,19 @@ def _call_openai_compat(cfg, system, user, temperature, max_tokens, timeout):
     return resp.choices[0].message.content.strip()
 
 def _call_gemini(cfg, system, user, temperature, max_tokens, timeout):
-    import google.generativeai as genai
-    genai.configure(api_key=cfg["api_key"])
-    model = genai.GenerativeModel(
-        model_name=cfg["model"],
-        system_instruction=system,
-        generation_config=genai.GenerationConfig(temperature=temperature, max_output_tokens=max_tokens),
+    from google import genai
+    from google.genai import types
+    client = genai.Client(api_key=cfg["api_key"])
+    response = client.models.generate_content(
+        model=cfg["model"],
+        contents=user,
+        config=types.GenerateContentConfig(
+            system_instruction=system,
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+        )
     )
-    return model.generate_content(user, request_options={"timeout": timeout}).text.strip()
+    return response.text.strip()
 
 _CALLERS = {
     "groq": _call_openai_compat, "nvidia": _call_openai_compat,

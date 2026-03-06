@@ -638,7 +638,8 @@ def main():
                 gitops=args.gitops,
                 gitops_repo=args.gitops_repo,
                 target_service=args.service,
-                publisher=publisher
+                publisher=publisher,
+                no_prompts=getattr(args, "no_prompts", False)
             )
         elif choice == '2':
             run_manual_menu(project_path, context, audit, publisher, run_id)
