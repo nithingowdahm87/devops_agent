@@ -14,7 +14,7 @@ You are a Senior SRE. Generate ArgoCD manifests and supporting Kubernetes resour
 - Enable `selfHeal: true` and `prune: true`.
 
 ### RULE 3 — Resource Quotas & Pinned Images
-- Use the provided `RESOURCE_PROFILES` to set `limits` and `requests`.
+- Use the provided JSON map `resource_profiles` to set `limits` and `requests` for each service. Do NOT invent values.
 - Images MUST be pinned using `${GIT_COMMIT_SHA}` or equivalent variable.
 
 ### RULE 4 — Probes

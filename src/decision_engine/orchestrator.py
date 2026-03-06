@@ -64,7 +64,7 @@ class V2Orchestrator:
                 logger.warning(f"Failed to init {name} client: {e}. Using Mock.")
                 self.generators.append(LLMGenerator(MockClient(name=f"Mock-{name}"), f"Mock-{name}"))
         
-    def run_pipeline(self, project_path: str, context: ProjectContext, environment: str = "dev", no_llm: bool = False, gitops: bool = False, gitops_repo: str = None, target_service: str = None, publisher=None):
+    def run_pipeline(self, project_path: str, context: ProjectContext, environment: str = "dev", no_llm: bool = False, gitops: bool = False, gitops_repo: str = None, target_service: str = None, publisher=None, no_prompts: bool = False):
         """
         Main entry point for V2 Pipeline.
         """
@@ -191,28 +191,36 @@ class V2Orchestrator:
 
         # 6. Run Stages (Level 10 Deterministic Sequence)
         all_artifacts = {}
-        stages = ["dockerfile", "docker_compose", "kubernetes"]
+        stages = ["dockerfile", "docker_compose", "kubernetes", "github_actions"]
         if gitops:
-            stages += ["github_actions", "gitops_manifests", "secrets_doc"]
+            stages += ["gitops_manifests", "secrets_doc"]
         else:
             stages.append("cicd")
 
         for stage in stages:
-            if stage in ["dockerfile", "github_actions"]:
+            if stage in ["dockerfile", "github_actions", "kubernetes"]:
                 # Per-service execution (Fixes Overhaul 2)
                 for svc in services:
                     try:
                         svc_ctx = per_service_contexts[svc]
-                        res_files = self._execute_stage(f"{stage.replace('_', ' ')} ({svc})", stage, project_path, svc_ctx, plan, environment=environment, no_llm=no_llm, service_name=svc)
+                        res_files = self._execute_stage(f"{stage.replace('_', ' ')} ({svc})", stage, project_path, svc_ctx, plan, environment=environment, no_llm=no_llm, service_name=svc, no_prompts=no_prompts)
                         if res_files:
                             for f in res_files:
                                 all_artifacts[f.path] = f.content
                     except Exception as e:
                         logger.error(f"Stage {stage} for {svc} failed: {e}")
             else:
-                # Project-wide execution (Compose, K8s, GitOps manifests, Secrets)
+                # Project-wide execution (Compose, GitOps manifests, Secrets, CICD)
                 try:
-                    res_files = self._execute_stage(stage.replace("_", " "), stage, project_path, context, plan, environment=environment, no_llm=no_llm)
+                    if stage == "gitops_manifests":
+                        resource_map = {}
+                        for svc in context.microservice_dirs:
+                            svc_ctx = per_service_contexts.get(svc)
+                            if svc_ctx and getattr(svc_ctx, "resources", None):
+                                resource_map[svc] = svc_ctx.resources
+                        setattr(context, "resource_profiles", resource_map)
+                        
+                    res_files = self._execute_stage(stage.replace("_", " "), stage, project_path, context, plan, environment=environment, no_llm=no_llm, no_prompts=no_prompts)
                     if res_files:
                         for f in res_files:
                             all_artifacts[f.path] = f.content
@@ -370,6 +378,16 @@ class V2Orchestrator:
                 f"limits.cpu: {context.resources.get('cpu_lim', '500m')}\n"
                 f"limits.memory: {context.resources.get('mem_lim', '512Mi')}\n"
             )
+
+        if stage_key == "gitops_manifests" and getattr(context, "resource_profiles", None):
+            import json
+            rp_str = json.dumps(context.resource_profiles, indent=2)
+            template += (
+                f"\n\nCRITICAL: Use the provided JSON map `resource_profiles` to set exact resource limits/requests for each service:\n"
+                f"```json\n{rp_str}\n```\n"
+                "Do NOT invent or hallucinate values. Map them precisely."
+            )
+
 
         
         candidates = []
@@ -659,6 +677,11 @@ class V2Orchestrator:
         
         # Filter details for ONLY this service
         svc_detail = base_context.microservice_details.get(service_name, {})
+        
+        # NEW restriction: explicitly isolate array paths to prevent LLM global leakage
+        ctx.microservice_dirs = [service_name]
+        ctx.microservice_details = {service_name: svc_detail}
+        
         svc_type = svc_detail.get("language", "unknown").lower()
         if "spring boot" in str(svc_detail.get("frameworks", [])).lower():
             svc_type = "java-spring-boot"
