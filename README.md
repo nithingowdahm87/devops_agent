@@ -1,6 +1,6 @@
 # DevOps Agent v12.2 (GitOps Ready)
 
-Production-grade AI agent that compiles Dockerfiles, Kubernetes manifests, and CI/CD pipelines from raw codebases. Deterministic compiler architecture with a 6-provider LLM fallback loop and a production GitOps generator.
+Production-grade AI agent that compiles Dockerfiles, Kubernetes manifests, and CI/CD pipelines from raw codebases. Deterministic compiler architecture with a local Ollama LLM and a production GitOps generator.
 
 ---
 
@@ -16,8 +16,8 @@ Codebase Input
 │
 ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Stage 2 — LLM Router (Deterministic Fallback)              │
-│ Groq → OpenRouter → Gemini → Cerebras → NVIDIA → HuggingFace → OpenAI│
+│ Stage 2 — LLM Router (Ollama Local)                        │
+│ Ollama (llama3.2:3b) → localhost:11434/v1                   │
 └────────────────────────┬────────────────────────────────────┘
 │
 ▼
@@ -40,21 +40,38 @@ Codebase Input
 
 ---
 
-## LLM Providers
+## Local LLM (Ollama-Only)
 
-The agent uses a **fallback loop** — if the primary provider fails or times out, it automatically tries the next in order.
+This agent now uses a **single local LLM provider**: [Ollama](https://ollama.com), via its OpenAI-compatible API at `http://localhost:11434/v1`.
 
-| Provider | Env Var | Default Model | Speed |
-|---|---|---|---|
-| Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Fastest |
-| OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-3.5-sonnet` | Fast |
-| Gemini | `GOOGLE_API_KEY` | `gemini-2.0-flash` | Fast |
-| Cerebras | `CEREBRAS_API_KEY` | `llama-3.1-70b-versatile` | Fast |
-| NVIDIA NIM | `NVIDIA_API_KEY` | `meta/llama-3.1-70b-instruct` | Medium |
-| HuggingFace | `HUGGINGFACE_TOKEN` | `mistralai/Mistral-7B-Instruct-v0.3` | Medium |
-| OpenAI | `OPENAI_API_KEY` | `gpt-4o-mini` | Stable |
+There are **no remote providers** (Groq, OpenAI, Gemini, etc.) in the runtime path anymore — every generation call goes through the local Ollama server.
 
-You do not need all six keys — any single key is enough to run the agent. Having multiple keys gives you automatic failover and zero downtime when one provider has an outage.
+### Why local only?
+
+- Zero cloud cost, no API keys.
+- Works fully offline once the model is pulled.
+- Deterministic behavior on a single machine (no cross-DC latency or provider drift).
+
+### Recommended models for 8 GB RAM
+
+For an 8 GB RAM laptop (WSL + Docker), use **lightweight Llama 3.2** models:
+
+- `llama3.2:3b` — default in `.env.example`, good quality and fits 8 GB easily.
+- `llama3.2:1b` — extra-light if RAM is very tight or you want maximum speed.
+
+Pull one model before running the agent:
+
+```bash
+# Install Ollama (Linux/Mac)
+/bin/bash -c "$(curl -fsSL https://ollama.com/install.sh)"
+
+# Pull a lightweight model (recommended for 8 GB RAM)
+ollama pull llama3.2:3b
+# or, for very low RAM:
+# ollama pull llama3.2:1b
+```
+
+The model name you pull must match the `OLLAMA_MODEL` value in your `.env` file.
 
 ---
 
@@ -75,7 +92,7 @@ pip install -r requirements.txt
 ### Configure
 ```bash
 cp .env.example .env
-# Edit .env — add your API keys. Never commit .env.
+# Edit .env — set your OLLAMA_MODEL and CI/CD secrets. Never commit .env.
 ```
 
 ### Run
@@ -85,6 +102,9 @@ cp .env.example .env
 
 # Dev mode (relaxed policies)
 ./run_agent.sh
+
+# Non-interactive (no extra customization questions)
+./run_agent.sh --no-prompts
 
 # Zero-LLM deterministic template mode
 ./run_agent.sh --no-llm
