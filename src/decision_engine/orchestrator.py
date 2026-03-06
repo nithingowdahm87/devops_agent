@@ -636,7 +636,7 @@ class V2Orchestrator:
                 from src.engine.artifact_manager import ArtifactManager
                 from src.engine.severity import Severity
                 art_mgr = ArtifactManager(project_path, environment)
-                sev = Severity.HIGH if not val_res.passed else Severity.LOW
+                sev = Severity.MEDIUM if not val_res.passed else Severity.LOW
                 art_mgr.write_gate(gen_file.path, gen_file.content, sev)
                 print(f"✅ Processed {filename}")
                 return [gen_file]
