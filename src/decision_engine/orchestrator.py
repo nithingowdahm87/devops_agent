@@ -658,15 +658,44 @@ class V2Orchestrator:
         return ctx
 
     def _setup_gitops_repo(self, project_path: str, repo_url: str):
-        """Detects or initializes GitOps repository structure (Overhaul 6)."""
+        """Detects or initializes GitOps repository structure (Overhaul 6 & 12)."""
         import os
+        import subprocess
         gitops_dir = os.path.join(project_path, "gitops-repo")
+        
+        # 1. Handle Remote Cloning
+        if repo_url and (repo_url.startswith("http") or repo_url.startswith("git@")):
+            if not os.path.exists(gitops_dir):
+                print(f"🌐 Cloning remote GitOps repository: {repo_url}...")
+                try:
+                    subprocess.run(["git", "clone", repo_url, gitops_dir], check=True, capture_output=True)
+                except subprocess.CalledProcessError as e:
+                    logger.error(f"Failed to clone GitOps repo: {e.stderr.decode()}")
+                    # Fallback to local init if clone fails
+            else:
+                print(f"🔄 Pulling latest changes from GitOps repository...")
+                try:
+                    subprocess.run(["git", "-C", gitops_dir, "pull"], check=True, capture_output=True)
+                except Exception as e:
+                    logger.warning(f"Failed to pull GitOps repo updates: {e}")
+
+        # 2. Local Initialization & Structure
         if not os.path.exists(gitops_dir):
             print(f"✨ Creating GitOps structural tree in {gitops_dir}...")
             os.makedirs(os.path.join(gitops_dir, "argocd"), exist_ok=True)
             os.makedirs(os.path.join(gitops_dir, "namespaces"), exist_ok=True)
+            
+            # Init as git repo if it's not one
+            try:
+                subprocess.run(["git", "init", gitops_dir], check=True, capture_output=True)
+            except Exception: pass
+
             # Minimal README/Structure
             with open(os.path.join(gitops_dir, "README.md"), "w") as f:
                 f.write("# GitOps Repository\nManaged by UrbanOps Agent v12.0")
+        
+        # Ensure standard folders exist
+        os.makedirs(os.path.join(gitops_dir, "argocd"), exist_ok=True)
+        os.makedirs(os.path.join(gitops_dir, "namespaces"), exist_ok=True)
 
 

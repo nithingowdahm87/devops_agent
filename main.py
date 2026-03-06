@@ -450,19 +450,23 @@ def run_debug_stage(project_path, context: ProjectContext, audit, publisher=None
     )
 
 
-# ================================================================
-# STAGE 8: Cloud Cost Estimation (FinOps)
-# ================================================================
 def run_cost_stage(project_path, context: ProjectContext, run_id="") -> StageResult:
     print_header("Stage 8: Cloud Cost Estimation (FinOps)")
     
-    # Check if K8s manifest exists
-    # Check if K8s manifest exists (new location)
+    # Check if K8s manifest exists (Traditional or GitOps layout)
     manifest_path = os.path.join(project_path, "k8s", "manifest.yaml")
+    gitops_path = os.path.join(project_path, "outputs", "shared", "gitops")
+    
+    if not os.path.exists(manifest_path) and os.path.exists(gitops_path):
+        # Scan for any manifest in the gitops folder
+        import glob
+        gitops_manifests = glob.glob(f"{gitops_path}/**/*.yaml", recursive=True)
+        if gitops_manifests:
+            manifest_path = gitops_manifests[0] # Use the first one for estimation
+            print(f"💰 Analyzing GitOps manifests for cost estimation: {os.path.basename(manifest_path)}")
+
     if not os.path.exists(manifest_path):
-        # Fallback to backend/frontend paths if root not found (simple check)
-        # For now, just warn
-        print(f"⚠️  No K8s manifest found at {manifest_path}. Skipping cost estimation.")
+        print(f"⚠️  No K8s manifest found at {manifest_path} or in GitOps area. Skipping cost estimation.")
         return StageResult(stage_name="Cost", status=Decision.REJECT, reasoning="No manifest found")
         
     try:

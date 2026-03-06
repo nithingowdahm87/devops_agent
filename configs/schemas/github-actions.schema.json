@@ -1,11 +1,36 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "GitHub Actions Workflow Schema",
+  "title": "GitHub Actions Workflow Schema (Hardened)",
   "type": "object",
-  "required": ["on", "jobs"],
+  "required": [
+    "on",
+    "jobs"
+  ],
   "properties": {
-    "name": { "type": "string" },
-    "on": { "type": "object" },
-    "jobs": { "type": "object" }
+    "name": {
+      "type": "string"
+    },
+    "on": {
+      "type": "object"
+    },
+    "jobs": {
+      "type": "object",
+      "patternProperties": {
+        ".*": {
+          "type": "object",
+          "required": [
+            "steps"
+          ],
+          "properties": {
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }
