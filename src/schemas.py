@@ -55,6 +55,8 @@ class ProjectContext(BaseModel):
     microservice_dirs: list[str] = Field(default_factory=list, description="Subdirectories that contain independent microservices (e.g. backend, frontend)")
     microservice_details: dict[str, Any] = Field(default_factory=dict, description="Per-service metadata: language, frameworks, ports, base_image")
     databases: dict[str, Any] = Field(default_factory=dict, description="Categorized databases: {rdbms: {name: [svcs]}, cache: {name: [svcs]}, nosql: {name: [svcs]}, broker: {name: [svcs]}}")
+    service_path: str = Field(default="")
+    resources: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("ports", mode="before")
     @classmethod

@@ -594,6 +594,9 @@ def main():
     from src.engine import config
     config.STRICT_MODE = args.strict
     
+    if args.gitops_repo:
+        os.environ["GITHUB_REPO"] = args.gitops_repo
+    
     configure_logging(json_mode=os.environ.get("LOG_JSON", "").lower() == "true")
     run_id = set_correlation_id()
     audit = AuditLog(run_id=run_id)

@@ -478,7 +478,7 @@ class V2Orchestrator:
         final_content = best_spec.file_content
         
         # Determine if we need to split multifile
-        if stage_key in ["dockerfile", "kubernetes", "docker_compose", "cicd"]:
+        if stage_key in ["dockerfile", "kubernetes", "docker_compose", "cicd", "github_actions", "gitops_manifests", "secrets_doc"]:
             import re
             pattern = r"FILENAME: (.*?)\n```(?:\w+)?\n(.*?)```"
             matches = re.findall(pattern, final_content, re.DOTALL)
@@ -534,10 +534,13 @@ class V2Orchestrator:
             else:
                 # BUG FIX: fix the cicd/k8s fallback filenames
                 filename_map = {
-                    "cicd":          ".github/workflows/ci.yml",
-                    "docker_compose":"docker-compose.yml",
-                    "dockerfile":    "generated_file",
-                    "kubernetes":    "k8s/manifests.yaml",
+                    "cicd":            ".github/workflows/ci.yml",
+                    "github_actions":  f".github/workflows/{service_name or 'service'}-ci.yml",
+                    "docker_compose":  "docker-compose.yml",
+                    "dockerfile":      "Dockerfile",
+                    "kubernetes":      "k8s/manifests.yaml",
+                    "gitops_manifests":"gitops/applicationset.yaml",
+                    "secrets_doc":     "docs/secrets.md",
                 }
                 filename = filename_map.get(stage_key, "generated_file")
                 
@@ -648,6 +651,8 @@ class V2Orchestrator:
         ctx.frameworks = svc_detail.get("frameworks", [])
         
         # Add a custom 'metadata' field for resource profiles
+        ctx.service_path = svc_detail.get("path", service_name)   # ensure code_analysis_agent fills 'path'
+        ctx.resources = profile
         ctx.raw_context_summary = f"Isolated Context for {service_name}\nResources: {profile}\nOriginal context follows:\n{ctx.raw_context_summary}"
         
         return ctx
