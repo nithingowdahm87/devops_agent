@@ -46,6 +46,43 @@ logger = get_logger("devops-agent.pipeline")
 # ================================================================
 # SHARED UTILS
 # ================================================================
+def _to_repo_slug(url_or_slug: str) -> str:
+    """
+    Normalize a GitHub repo identifier to 'owner/repo' slug form.
+
+    Accepts:
+      - 'owner/repo'
+      - 'https://github.com/owner/repo.git'
+      - 'git@github.com:owner/repo.git'
+    """
+    url_or_slug = (url_or_slug or "").strip()
+    if not url_or_slug:
+        return ""
+
+    # HTTPS/HTTP URL
+    if url_or_slug.startswith(("http://", "https://")):
+        from urllib.parse import urlparse
+
+        path = urlparse(url_or_slug).path.strip("/")
+        if path.endswith(".git"):
+            path = path[:-4]
+        return path  # owner/repo
+
+    # SSH URL
+    if url_or_slug.startswith("git@"):
+        # git@github.com:owner/repo.git
+        try:
+            _, path = url_or_slug.split(":", 1)
+        except ValueError:
+            return url_or_slug
+        path = path.strip("/")
+        if path.endswith(".git"):
+            path = path[:-4]
+        return path
+
+    # Already a slug
+    return url_or_slug
+
 def print_header(title):
     print("\n" + "="*60)
     print(f"🚀 {title}")
@@ -598,8 +635,18 @@ def main():
     from src.engine import config
     config.STRICT_MODE = args.strict
     
+    gitops_repo_url = None
     if args.gitops_repo:
-        os.environ["GITHUB_REPO"] = args.gitops_repo
+        # Derive slug for GitHub API (GitOpsPublisher)
+        slug = _to_repo_slug(args.gitops_repo)
+        if slug:
+            os.environ["GITHUB_REPO"] = slug
+
+        # Derive a clone URL for V2Orchestrator._setup_gitops_repo
+        if args.gitops_repo.startswith(("http://", "https://", "git@")):
+            gitops_repo_url = args.gitops_repo
+        elif slug:
+            gitops_repo_url = f"https://github.com/{slug}.git"
     
     configure_logging(json_mode=os.environ.get("LOG_JSON", "").lower() == "true")
     run_id = set_correlation_id()
@@ -631,15 +678,15 @@ def main():
         if choice == '1':
             orchestrator = V2Orchestrator()
             orchestrator.run_pipeline(
-                project_path, 
-                context, 
-                environment=args.env, 
+                project_path,
+                context,
+                environment=args.env,
                 no_llm=args.no_llm,
                 gitops=args.gitops,
-                gitops_repo=args.gitops_repo,
+                gitops_repo=gitops_repo_url or args.gitops_repo,
                 target_service=args.service,
                 publisher=publisher,
-                no_prompts=getattr(args, "no_prompts", False)
+                no_prompts=getattr(args, "no_prompts", False),
             )
         elif choice == '2':
             run_manual_menu(project_path, context, audit, publisher, run_id)

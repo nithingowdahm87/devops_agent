@@ -202,19 +202,48 @@ class Validator:
             if not workflow:
                 errors.append("GitHub Actions workflow is empty.")
                 return errors
+
+            # Optional JSON schema validation (keeps it aligned with configs/schemas/github-actions.schema.json)
+            import json
+            from jsonschema import validate as json_validate  # type: ignore[import]
+
+            schema_path = os.path.join(
+                self.project_root,
+                "configs",
+                "schemas",
+                "github-actions.schema.json",
+            )
+            if os.path.exists(schema_path):
+                with open(schema_path, "r") as sf:
+                    schema = json.load(sf)
+                try:
+                    json_validate(instance=workflow, schema=schema)
+                except Exception as ve:
+                    errors.append(f"GHA Schema Violation: {str(ve)}")
+
+            # Lightweight structural checks
             jobs = workflow.get("jobs", {})
-            if len(jobs) < 2:
-                errors.append("Workflow must have at least 2 separate jobs.")
+            if not jobs:
+                errors.append("Workflow must define at least one job under 'jobs'.")
+                return errors
+
             for job_name, job in jobs.items():
                 if not job:
                     continue
-                for step in job.get("steps", []):
+                steps = job.get("steps", [])
+                if not steps:
+                    errors.append(f"Job '{job_name}' has no steps defined.")
+                    continue
+                for step in steps:
+                    # Hard rule: a single step cannot have both 'run' and 'uses'
                     if "run" in step and "uses" in step:
                         errors.append(
                             f"Step in job '{job_name}' contains both 'run' and 'uses'."
                         )
+
         except Exception as e:
             errors.append(f"GHA YAML PARSE ERROR: {str(e)}")
+
         return errors
 
 

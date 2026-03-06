@@ -32,16 +32,34 @@ class _SafeDict(dict):
 def render_prompt(template: str, context: dict) -> str:
     """
     Render prompt template with application context.
-    Uses simple replacement to avoid issues with code blocks containing {}
+
+    Supports both `{key}` and `{{ key }}` style placeholders used in
+    the new GitHub Actions / ArgoCD prompts.
     """
     result = template
-    # We only care about these primary keys in the orchestrator V2
-    keys_to_replace = ["context", "plan_summary", "project_name"]
-    
+
+    # Keys we actually use in prompts
+    keys_to_replace = [
+        "context",
+        "plan_summary",
+        "project_name",
+        "service_name",
+        "svc_name",
+        "service_path",
+        "language",
+        "resources",
+    ]
+
     for key in keys_to_replace:
-        placeholder = "{" + key + "}"
-        if placeholder in result:
-            val = str(context.get(key, ""))
-            result = result.replace(placeholder, val)
-            
+        value = str(context.get(key, ""))
+        # Support multiple placeholder styles
+        patterns = [
+            "{" + key + "}",              # {key}
+            "{{ " + key + " }}",          # {{ key }}
+            "{{" + key + "}}",            # {{key}}
+        ]
+        for pattern in patterns:
+            if pattern in result:
+                result = result.replace(pattern, value)
+
     return result
