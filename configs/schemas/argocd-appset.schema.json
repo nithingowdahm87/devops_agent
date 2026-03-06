@@ -1,0 +1,46 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "ArgoCD ApplicationSet Schema (Hardened)",
+    "type": "object",
+    "required": [
+        "apiVersion",
+        "kind",
+        "metadata",
+        "spec"
+    ],
+    "properties": {
+        "apiVersion": {
+            "const": "argoproj.io/v1alpha1"
+        },
+        "kind": {
+            "const": "ApplicationSet"
+        },
+        "spec": {
+            "type": "object",
+            "required": [
+                "generators",
+                "template"
+            ],
+            "properties": {
+                "template": {
+                    "type": "object",
+                    "required": [
+                        "metadata",
+                        "spec"
+                    ],
+                    "properties": {
+                        "spec": {
+                            "type": "object",
+                            "required": [
+                                "destination",
+                                "project",
+                                "source",
+                                "syncPolicy"
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -112,6 +112,29 @@ class Validator:
             else:
                 errors.append(f"KUBECONFORM ERROR:\n{out or err}")
 
+        # internal schema validation for Argo
+        try:
+            import json
+            from jsonschema import validate as json_validate
+            docs = list(yaml.safe_load_all(file.content))
+            for doc in docs:
+                if not doc: continue
+                kind = doc.get("kind")
+                if kind in ["Application", "ApplicationSet"]:
+                    schema_name = "argocd-app.schema.json" if kind == "Application" else "argocd-appset.schema.json"
+                    schema_path = os.path.join(self.project_root, "configs", "schemas", schema_name)
+                    if os.path.exists(schema_path):
+                        with open(schema_path, "r") as sf:
+                            schema = json.load(sf)
+                        try:
+                            json_validate(instance=doc, schema=schema)
+                        except Exception as ve:
+                            errors.append(f"Argo {kind} Schema Violation: {str(ve)}")
+        except ImportError:
+            pass # jsonschema not installed
+        except Exception as e:
+            logger.warning(f"Internal Argo validation failed: {e}")
+
         try:
             docs = list(yaml.safe_load_all(file.content))
             for doc in docs:

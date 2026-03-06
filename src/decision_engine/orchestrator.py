@@ -64,11 +64,12 @@ class V2Orchestrator:
                 logger.warning(f"Failed to init {name} client: {e}. Using Mock.")
                 self.generators.append(LLMGenerator(MockClient(name=f"Mock-{name}"), f"Mock-{name}"))
         
-    def run_pipeline(self, project_path: str, context: ProjectContext, environment: str = "dev", no_llm: bool = False, gitops: bool = False, gitops_repo: str = None, target_service: str = None):
+    def run_pipeline(self, project_path: str, context: ProjectContext, environment: str = "dev", no_llm: bool = False, gitops: bool = False, gitops_repo: str = None, target_service: str = None, publisher=None):
         """
         Main entry point for V2 Pipeline.
         """
-        logger.info("🚀 Starting V2 Decision Engine Pipeline | GitOps=%s", gitops)
+        self.publisher = publisher
+        logger.info("🚀 Starting V2 Decision Engine Pipeline | GitOps=%s | Publisher=%s", gitops, publisher.mode if publisher else "None")
         self.memory = LongTermMemory(project_path)
         
         # 0. GitOps Setup (New)
@@ -530,6 +531,20 @@ class V2Orchestrator:
                     sev = Severity.HIGH if not val_res.passed else Severity.LOW
                     art_mgr.write_gate(gen_file.path, gen_file.content, sev)
                     processed_files.append(gen_file)
+
+                # --- V2 Automated PR Integration (Final Form 12) ---
+                if self.publisher and stage_key in ["github_actions", "gitops_manifests"]:
+                    try:
+                        pub_files = {f.path: f.content for f in processed_files}
+                        self.publisher.publish(
+                            files=pub_files,
+                            stage=stage_key,
+                            run_id=getattr(self, "run_id", "v2-auto"),
+                            reasoning=f"V2 Orchestrator automated {stage_key} generation",
+                            project_path=project_path
+                        )
+                    except Exception as pe:
+                        logger.error(f"V2 Publisher failed: {pe}")
                 return processed_files
             else:
                 # BUG FIX: fix the cicd/k8s fallback filenames

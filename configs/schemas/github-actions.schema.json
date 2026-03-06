@@ -11,7 +11,24 @@
       "type": "string"
     },
     "on": {
-      "type": "object"
+      "type": "object",
+      "required": [
+        "push"
+      ],
+      "properties": {
+        "push": {
+          "type": "object",
+          "properties": {
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
+          }
+        }
+      }
     },
     "jobs": {
       "type": "object",
@@ -25,7 +42,12 @@
             "steps": {
               "type": "array",
               "items": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "uses": {
+                    "type": "string"
+                  }
+                }
               }
             }
           }
