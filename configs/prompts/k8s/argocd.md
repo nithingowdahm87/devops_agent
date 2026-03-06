@@ -24,17 +24,17 @@ You are a Senior SRE. Generate ArgoCD manifests and supporting Kubernetes resour
 ---
 
 ## OUTPUT FORMAT
-FILENAME: gitops/argocd/applicationset.yaml
+FILENAME: argocd/applicationset.yaml
 ```yaml
 <applicationset_content>
 ```
 
-FILENAME: gitops/namespaces/{{ svc_name }}.yaml
+FILENAME: namespaces/{{ svc_name }}.yaml
 ```yaml
 <namespace_content>
 ```
 
-FILENAME: gitops/apps/{{ svc_name }}/deployment.yaml
+FILENAME: apps/{{ svc_name }}/deployment.yaml
 ```yaml
 <deployment_content>
 ```

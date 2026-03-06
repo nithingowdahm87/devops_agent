@@ -1,63 +1,57 @@
-# DevOps Agent V14.0
+# DevOps Agent v12.2 (GitOps Ready)
 
-Production-grade AI agent that compiles Dockerfiles, Kubernetes manifests, and CI/CD pipelines from raw codebases. Deterministic compiler architecture with a 6-provider LLM fallback loop. Built to the standard of a 10-year Senior DevSecOps engineer.
+Production-grade AI agent that compiles Dockerfiles, Kubernetes manifests, and CI/CD pipelines from raw codebases. Deterministic compiler architecture with a 6-provider LLM fallback loop and a production GitOps generator.
 
 ---
 
-## Architecture
+## Architecture (v12.2 Overhaul)
 
 Codebase Input
 │
 ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Stage 1 — Code Discovery & Architecture Graph │
-│ Detects runtime, frameworks, DB signatures, port, secrets │
+│ Stage 1 — Code Discovery & Per-Service Isolation          │
+│ Detects microservices, runtime versions, port assignments  │
 └────────────────────────┬────────────────────────────────────┘
 │
 ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Stage 2 — LLM Router (6-provider fallback loop) │
-│ Groq → Gemini → Cerebras → NVIDIA → OpenRouter → HuggingFace │
+│ Stage 2 — LLM Router (Deterministic Fallback)              │
+│ Groq → Gemini → Cerebras → OpenAI → NVIDIA → OpenRouter    │
 └────────────────────────┬────────────────────────────────────┘
 │
 ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Stage 3 — Artifact Generation (Dockerfile / K8s / CI/CD) │
-│ JSON Schema validation before semantic checks │
+│ Stage 3 — GitOps Pipeline Generation                       │
+│ GitHub Actions (per-svc) / ArgoCD Manifests / Secrets Doc  │
 └────────────────────────┬────────────────────────────────────┘
 │
 ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Stage 4 — OODA Healing Loop │
-│ hadolint / kubeconform → Healer → re-validate │
+│ Stage 4 — OODA Healing & Schema Validation                 │
+│ hadolint / kubeconform / JSON Schema → Healer → Validate   │
 └────────────────────────┬────────────────────────────────────┘
 │
 ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Stage 5 — Policy Engine (prod vs dev) │
-│ Enforces non-root, resource limits, probe definitions │
-└────────────────────────┬────────────────────────────────────┘
-│
-▼
-┌─────────────────────────────────────────────────────────────┐
-│ Stage 6 — Cross-Artifact Integrity Audit │
-│ Detects Port Drift, Image Tag Drift, Variable Inconsistency│
+│ Stage 5 — Artifact Hierarchy (Outputs)                     │
+│ outputs/per-service/ | outputs/shared/ | outputs/docs/     │
 └─────────────────────────────────────────────────────────────┘
 
 ---
 
 ## LLM Providers
 
-The agent uses a **fallback loop** — if the primary provider fails or times out, it automatically tries the next in order. Set `LLM_PRIMARY` to control which is tried first.
+The agent uses a **fallback loop** — if the primary provider fails or times out, it automatically tries the next in order.
 
 | Provider | Env Var | Default Model | Speed |
 |---|---|---|---|
 | Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Fastest |
-| Gemini | `GOOGLE_API_KEY` | `gemini-2.0-flash-exp` | Fast |
-| Cerebras | `CEREBRAS_API_KEY` | `llama3.1-70b` | Fast |
+| Gemini | `GOOGLE_API_KEY` | `gemini-2.0-flash` | Fast |
+| Cerebras | `CEREBRAS_API_KEY` | `llama-3.1-70b-versatile` | Fast |
+| OpenAI | `OPENAI_API_KEY` | `gpt-4o-mini` | Stable |
 | NVIDIA NIM | `NVIDIA_API_KEY` | `meta/llama-3.1-70b-instruct` | Medium |
 | OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-3.5-sonnet` | Medium |
-| HuggingFace | `HUGGINGFACE_TOKEN` | `Mistral-7B-Instruct-v0.3` | Fallback |
 
 You do not need all six keys — any single key is enough to run the agent. Having multiple keys gives you automatic failover and zero downtime when one provider has an outage.
 
@@ -93,37 +87,30 @@ cp .env.example .env
 
 # Zero-LLM deterministic template mode
 ./run_agent.sh --no-llm
+
+# GitOps Mode (Automated Repo Setup + PRs)
+./run_agent.sh --gitops --gitops-repo https://github.com/org/gitops-infra
+
+# Targeted Single-Service Run
+./run_agent.sh --service auth-service --gitops
 ```
 
-## Project Structure
+## GitOps Mode
+When `--gitops` is enabled, the agent:
+1. **Per-Service CI**: Generates `.github/workflows/{{svc}}-ci.yml` with scoped path triggers.
+2. **ArgoCD Support**: Generates `ApplicationSet` and namespaced Kubernetes files.
+3. **Multi-Repo Sync**: Clones/Pulls the `--gitops-repo` and automatically creates PRs or commits if `GITHUB_TOKEN` is present.
+4. **Isolated Context**: Each service receives its own resource profile (CPU/RAM) and metadata.
+
+## Directory Hierarchy
+Generated files are organized in `outputs/` to support monorepos cleanly:
 ```text
-devops_agent/
-├── main.py                        # CLI entry point
-├── run_agent.sh                   # Shell wrapper
-├── .env.example                   # Env template — copy to .env
-├── requirements.txt               # Python deps
-├── src/
-│   └── engine/
-│       ├── llm.py                 # 6-provider LLM router + fallback loop
-│       ├── config.py              # Central env config loader
-│       ├── compiler_pipeline.py   # Master pipeline controller
-│       ├── graph.py               # Immutable Architecture Graph
-│       ├── integrity.py           # Cross-artifact consistency auditor
-│       ├── healer.py              # OODA healing loop
-│       ├── policy_engine.py       # Prod/dev policy enforcement
-│       ├── rag.py                 # RAG context retrieval
-│       ├── validate.py            # Schema + semantic validation
-│       └── scoring.py             # Production readiness score
-├── configs/
-│   └── prompts/
-│       ├── docker/
-│       │   ├── docker_production.md   # 20-rule Dockerfile generator
-│       │   └── docker_compose.md      # Compose generator rules
-│       ├── k8s/
-│       │   └── k8s_production.md      # CIS Benchmark K8s generator
-│       └── cicd/
-│           └── cicd_production.md     # GitHub Actions DevSecOps generator
-└── tests/
+outputs/
+├── per-service/          # Dockerfiles, CI workflows, and K8s manifests
+│   └── <service-name>/
+├── shared/               # docker-compose.yml and baseline K8s
+│   └── gitops/           # ArgoCD & ApplicationSet manifests
+└── docs/                 # Secrets requirements and audit reports
 ```
 
 ## Prompt Standards
@@ -136,12 +123,12 @@ All prompts follow a 4-step structure used by production DevSecOps teams:
 
 Prompts are stored in `configs/prompts/` and are loaded by the RAG engine at runtime.
 
-| Prompt File | Covers | Rules Count |
+| Prompt File | Covers | Features |
 |---|---|---|
-| docker/docker_production.md | Dockerfile (5 languages) | 13 rules |
-| docker/docker_compose.md | docker-compose.yml | 10 rules |
-| k8s/k8s_production.md | Namespace/Deploy/HPA/PDB/NetworkPolicy | 12 rules |
-| cicd/cicd_production.md | GitHub Actions full pipeline | 10 rules |
+| docker/docker_production.md | Dockerfile (5 languages) | 13 rules, Non-root, Multi-stage |
+| k8s/argocd.md | ArgoCD ApplicationSet | App-of-Apps, Auto-heal, Namespacing |
+| cicd/github_actions.md | GitHub Actions CI/CD | Path scoped triggers, GitOps Push |
+| docs/secrets.md | secrets-required.md | Dependency mapping from code analysis |
 
 ## Security
 - API keys are loaded from `.env` only — never hardcoded in source

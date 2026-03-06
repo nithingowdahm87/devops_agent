@@ -498,7 +498,9 @@ class V2Orchestrator:
                     elif stage_key == "docker_compose":
                         rel_path = f"outputs/shared/{rel_path}"
                     elif stage_key == "gitops_manifests":
-                        rel_path = f"outputs/shared/gitops/{rel_path}"
+                        # Strip redundant 'gitops/' prefix if prompt generated it (Phase 3 Polish)
+                        clean_path = rel_path[7:] if rel_path.startswith("gitops/") else rel_path
+                        rel_path = f"outputs/shared/gitops/{clean_path}"
                     else:
                         rel_path = f"outputs/docs/{rel_path}" if "doc" in stage_key else f"outputs/shared/{rel_path}"
                         
