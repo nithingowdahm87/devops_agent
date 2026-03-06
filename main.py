@@ -629,8 +629,14 @@ def main():
     parser.add_argument("--gitops-repo", type=str, help="GitOps repository URL or path")
     parser.add_argument("--service", type=str, help="Target a specific microservice only")
     parser.add_argument("--no-prompts", action="store_true", help="Run fully non-interactive (skip extra customization questions)")
+    parser.add_argument("--llm-mode", type=str, choices=["remote_first", "ollama_first", "ollama_only"],
+                        default=os.environ.get("LLM_PROVIDER_MODE", "remote_first"),
+                        help="LLM provider mode: remote_first, ollama_first, or ollama_only")
     parser.add_argument("path", type=str, nargs="?", help="Project path")
     args = parser.parse_args()
+
+    # Set LLM provider mode from CLI
+    os.environ["LLM_PROVIDER_MODE"] = args.llm_mode
 
     # Configure based on args
     from src.engine import config

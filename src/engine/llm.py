@@ -1,6 +1,6 @@
 """
-LLM Router — 6-provider fallback chain with exponential backoff.
-Provider order: Groq → Gemini → Cerebras → NVIDIA → OpenRouter → HuggingFace
+LLM Router — 8-provider fallback chain with exponential backoff.
+Provider order: Groq → NVIDIA → Cerebras → OpenRouter → HuggingFace → OpenAI → Gemini → Ollama
 """
 from __future__ import annotations
 import os, time, logging
@@ -13,20 +13,22 @@ _BASES = {
     "openrouter":  "https://openrouter.ai/api/v1",
     "huggingface": "https://router.huggingface.co/hf-inference/v1",
     "openai":      "https://api.openai.com/v1",
+    "ollama":      "http://localhost:11434/v1",  # Local Ollama server
 }
 
 # ── Task-based model routing ──────────────────────────────────────────────────
 # Each task type gets the best provider first, then falls back automatically.
-# Gemini is intentionally demoted behind Groq and OpenRouter until fully migrated to google.genai
+# Ollama is always last — local safety net when all clouds fail.
 _TASK_ROUTES = {
-    "docker":          ["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
-    "k8s":             ["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
-    "ci":              ["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
-    "github_actions":  ["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
-    "gitops_manifests":["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
-    "heal":            ["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
-    "critique":        ["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
-    "default":         ["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
+    "docker":          ["groq", "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini", "ollama"],
+    "k8s":             ["groq", "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini", "ollama"],
+    "ci":              ["groq", "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini", "ollama"],
+    "cicd":            ["groq", "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini", "ollama"],
+    "github_actions":  ["groq", "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini", "ollama"],
+    "gitops_manifests":["groq", "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini", "ollama"],
+    "heal":            ["groq", "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini", "ollama"],
+    "critique":        ["groq", "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini", "ollama"],
+    "default":         ["groq", "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini", "ollama"],
 }
 
 def _e(k, d=""): return os.environ.get(k, d).strip()
@@ -34,7 +36,7 @@ def _e(k, d=""): return os.environ.get(k, d).strip()
 def _cfg(task_type="default"):
     # Task-specific model overrides
     groq_model = "llama-3.3-70b-versatile"  # mixtral-8x7b-32768 was decommissioned
-    
+
     return {
         "groq":        {"api_key": _e("GROQ_API_KEY"),        "model": _e("GROQ_MODEL",        groq_model),                          "base_url": _BASES["groq"]},
         "gemini":      {"api_key": _e("GOOGLE_API_KEY"),      "model": _e("GEMINI_MODEL",      "gemini-2.0-flash")},
@@ -43,6 +45,11 @@ def _cfg(task_type="default"):
         "openrouter":  {"api_key": _e("OPENROUTER_API_KEY"),  "model": _e("OPENROUTER_MODEL",  "anthropic/claude-3.5-sonnet"),       "base_url": _BASES["openrouter"]},
         "huggingface": {"api_key": _e("HUGGINGFACE_TOKEN"),   "model": _e("HUGGINGFACE_MODEL", "mistralai/Mistral-7B-Instruct-v0.3"),"base_url": _BASES["huggingface"]},
         "openai":      {"api_key": _e("OPENAI_API_KEY"),       "model": _e("OPENAI_MODEL",      "gpt-4o-mini"),                       "base_url": _BASES["openai"]},
+        "ollama":      {
+            "api_key":  _e("OLLAMA_API_KEY", "ollama"),            # stub; Ollama ignores it
+            "model":    _e("OLLAMA_MODEL", "llama3.2:3b"),         # good default for 8 GB
+            "base_url": _BASES["ollama"],
+        },
     }
 
 # ── Provider health tracker (skips recently-failed providers) ─────────────────
@@ -50,6 +57,14 @@ _health: dict[str, float] = {}   # provider → unix timestamp of last failure
 _COOLDOWN = 120                   # seconds to skip a provider after failure
 
 def _is_healthy(provider: str) -> bool:
+    if provider == "ollama":
+        import socket
+        try:
+            socket.create_connection(("127.0.0.1", 11434), timeout=1)
+            return True
+        except OSError:
+            return False
+
     last_fail = _health.get(provider, 0)
     return (time.time() - last_fail) > _COOLDOWN
 
@@ -86,7 +101,8 @@ def _call_gemini(cfg, system, user, temperature, max_tokens, timeout):
 _CALLERS = {
     "groq": _call_openai_compat, "nvidia": _call_openai_compat,
     "cerebras": _call_openai_compat, "openrouter": _call_openai_compat,
-    "huggingface": _call_openai_compat, "gemini": _call_gemini,
+    "huggingface": _call_openai_compat, "openai": _call_openai_compat,
+    "ollama": _call_openai_compat, "gemini": _call_gemini,
 }
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -97,15 +113,29 @@ def call_llm(system_prompt: str, user_prompt: str, task_type: str = "default", m
     Automatically skips providers that failed recently (cooldown window).
     """
     order       = _TASK_ROUTES.get(task_type, _TASK_ROUTES["default"])
+
+    mode = _e("LLM_PROVIDER_MODE", "remote_first").lower()
+    # Modes:
+    #   remote_first  → use TASK_ROUTES as-is (Ollama last)
+    #   ollama_first  → try Ollama, then others
+    #   ollama_only   → force-only Ollama
+    if mode == "ollama_only":
+        order = ["ollama"]
+    elif mode == "ollama_first":
+        if "ollama" not in order:
+            order = ["ollama"] + order
+        else:
+            order = ["ollama"] + [p for p in order if p != "ollama"]
+
     temperature = float(_e("LLM_TEMPERATURE", "0.1"))
-    
+
     # Safely compute token limits, respecting the specific task budget overrides
     env_max = int(os.environ.get("LLM_MAX_TOKENS", "1024"))
     max_tokens  = min(max_tokens_budget, env_max)
-    
+
     timeout     = int(_e("LLM_TIMEOUT_SECONDS","45"))
     max_retries = int(_e("LLM_MAX_RETRIES",   "3"))
-    
+
     cfg_map     = _cfg(task_type)
     errors: list[str] = []
 

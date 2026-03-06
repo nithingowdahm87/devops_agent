@@ -44,6 +44,11 @@ class V2Orchestrator:
         self.healer = Healer()
         self.environment = environment
         self.memory = None # Init later with project_path
+
+        # Global customization preferences (K8s-first, reusable later)
+        self._custom_prompt_initialized = False
+        self._custom_prompt_mode = "none"   # "none" | "file" | "qa"
+        self._custom_prompt_text = ""
         
         # Initialize Generators (Safe Layout)
         self.generators = []
@@ -302,38 +307,27 @@ class V2Orchestrator:
             
         # Optional User Input for K8s & Dockerfile
         custom_instructions = ""
-        if stage_key == "kubernetes" or stage_key == "dockerfile":
+
+        if stage_key in ("kubernetes", "dockerfile"):
             if stage_key == "kubernetes":
                 template += "\n\nCRITICAL: Output EACH Kubernetes resource (Deployment, Service, Ingress, Secrets, ConfigMap, Namespace etc.) in its OWN SEPARATE file using the FILENAME format: \nFILENAME: k8s/filename.yaml\n```yaml\n<content>\n```"
                 print("\n" + "="*50)
                 print("☸️   KUBERNETES MANIFEST CUSTOMIZATION")
                 print("="*50)
+
+                # One-time global question for all K8s artifacts
+                ci = self._configure_customization(stage_key, display_name, no_prompts)
+                if ci:
+                    template += f"\n\nUSER CUSTOM INSTRUCTIONS (MUST FOLLOW):\n{ci}"
+
             if stage_key == "dockerfile" and len(context.microservice_dirs) > 0:
                 dirs = ", ".join(context.microservice_dirs)
-                template += f"\n\nCRITICAL: Automatically output EACH Dockerfile in its respective directory using the FILENAME format (e.g., frontend/Dockerfile, backend/Dockerfile). These are the required directories to cover: {dirs}\nFILENAME: <dir>/Dockerfile\n```dockerfile\n<content>\n```"
-            else:
-                if no_prompts:
-                    user_input = "n"
-                else:
-                    user_input = input(f"Would you like to provide custom instructions for {display_name}? [y/N]: ").strip().lower()
-                    
-                if user_input in ['y', 'yes']:
-                    print("Options for Custom Instructions:")
-                    print("  1. Type instructions directly")
-                    print("  2. Provide a path to a file with instructions")
-                    choice = input("Choice (1/2): ").strip()
-                    if choice == '1':
-                        custom_instructions = input("Enter instructions: ").strip()
-                    elif choice == '2':
-                        filepath = input("Enter file path: ").strip()
-                        try:
-                            from src.tools.file_ops import read_file
-                            custom_instructions = read_file(filepath)
-                        except Exception as e:
-                            print(f"Failed to read file: {e}")
-                    
-                    if custom_instructions:
-                        template += f"\n\nUSER CUSTOM INSTRUCTIONS (MUST FOLLOW):\n{custom_instructions}"
+                template += (
+                    f"\n\nCRITICAL: Automatically output EACH Dockerfile in its respective "
+                    f"directory using the FILENAME format (e.g., frontend/Dockerfile, backend/Dockerfile). "
+                    f"These are the required directories to cover: {dirs}\n"
+                    "FILENAME: <dir>/Dockerfile\n```dockerfile\n<content>\n```"
+                )
             
         # 2. Generate Drafts (Parallel)
         svc = service_name or getattr(context, "project_name", "unknown")
@@ -682,6 +676,76 @@ class V2Orchestrator:
             print("⚠️ No referenced files found in content. Dumping raw to 'scan_configs.md'")
             write_file(os.path.join(project_path, "scan_configs.md"), content)
 
+    def _configure_customization(self, stage_key: str, display_name: str, no_prompts: bool) -> str:
+        """
+        Global customization helper.
+
+        - Asks once for Kubernetes (and can be reused for others later).
+        - Returns a custom instructions string to append to the prompt template,
+          or "" if running fully self-analysed.
+        """
+        # If running in fully non-interactive mode, never ask.
+        if no_prompts:
+            self._custom_prompt_initialized = True
+            self._custom_prompt_mode = "none"
+            return ""
+
+        # For now, only gate on first Kubernetes run; you can reuse for others by
+        # removing the stage_key guard.
+        if stage_key != "kubernetes":
+            # For non-K8s stages, reuse previously-decided mode/text if any.
+            return self._custom_prompt_text or ""
+
+        if self._custom_prompt_initialized:
+            return self._custom_prompt_text or ""
+
+        # Ask once, y/n with default "n"
+        ans = input("Would you like to customize Kubernetes manifests? [y/n]: ").strip().lower()
+        if ans not in ("y", "yes"):
+            # User said "n" or pressed Enter → never ask again
+            self._custom_prompt_initialized = True
+            self._custom_prompt_mode = "none"
+            self._custom_prompt_text = ""
+            return ""
+
+        # User opted in → choose how to provide instructions
+        print("\nKubernetes customization options:")
+        print("  1. Provide a path to a file with instructions")
+        print("  2. Answer a short set of questions now")
+        choice = input("Choice (1/2): ").strip()
+
+        custom = ""
+        if choice == "1":
+            filepath = input("Enter file path: ").strip()
+            try:
+                from src.tools.file_ops import read_file
+                custom = read_file(filepath)
+                self._custom_prompt_mode = "file"
+            except Exception as e:
+                print(f"Failed to read file: {e}")
+                custom = ""
+                self._custom_prompt_mode = "none"
+        else:
+            # Simple Q&A to derive structured instructions
+            print("\nAnswer a few questions to guide Kubernetes generation:")
+            ns = input("Namespace to use (default 'default'): ").strip() or "default"
+            domain = input("Ingress host/domain (leave blank for no ingress): ").strip()
+            env = input("Environment label (dev/staging/prod, default 'dev'): ").strip() or "dev"
+
+            lines = [
+                f"- Use namespace: {ns}",
+                f"- Environment label: {env}",
+            ]
+            if domain:
+                lines.append(f"- Expose HTTP ingress at host: {domain}")
+            lines.append("- Use resource limits exactly as provided in resource_profiles where available.")
+            custom = "KUBERNETES CUSTOMIZATION:\n" + "\n".join(lines)
+            self._custom_prompt_mode = "qa"
+
+        self._custom_prompt_initialized = True
+        self._custom_prompt_text = custom.strip()
+        return self._custom_prompt_text
+
     def _isolate_context(self, base_context: ProjectContext, service_name: str) -> ProjectContext:
         """Creates a service-specific context with dedicated resource profiles."""
         import copy
@@ -695,19 +759,25 @@ class V2Orchestrator:
         ctx.microservice_details = {service_name: svc_detail}
         
         svc_type = svc_detail.get("language", "unknown").lower()
-        if "spring boot" in str(svc_detail.get("frameworks", [])).lower():
+        fw_lower = str(svc_detail.get("frameworks", [])).lower()
+        base_img = str(svc_detail.get("base_image", "")).lower()
+
+        if "spring boot" in fw_lower:
             svc_type = "java-spring-boot"
-        elif "fastapi" in str(svc_detail.get("frameworks", [])).lower():
+        elif "fastapi" in fw_lower:
             svc_type = "python-fastapi"
-        elif "react" in str(svc_detail.get("frameworks", [])).lower() or "nginx" in str(svc_detail.get("base_image", "")).lower():
+        elif "react" in fw_lower or "nginx" in base_img:
             svc_type = "react-nginx"
+        elif "express" in fw_lower or "nestjs" in fw_lower or "node" in svc_type:
+            svc_type = "node-express"
             
         # Dynamic Resource Allocation (Overhaul 4)
         RESOURCE_PROFILES = {
             'java-spring-boot': {'cpu_req': '250m', 'cpu_lim': '500m', 'mem_req': '512Mi', 'mem_lim': '1Gi'},
-            'python-fastapi': {'cpu_req': '100m', 'cpu_lim': '300m', 'mem_req': '256Mi', 'mem_lim': '512Mi'},
-            'react-nginx': {'cpu_req': '50m', 'cpu_lim': '250m', 'mem_req': '128Mi', 'mem_lim': '512Mi'},
-            'default': {'cpu_req': '100m', 'cpu_lim': '200m', 'mem_req': '128Mi', 'mem_lim': '256Mi'}
+            'python-fastapi':   {'cpu_req': '100m', 'cpu_lim': '300m', 'mem_req': '256Mi', 'mem_lim': '512Mi'},
+            'react-nginx':      {'cpu_req': '50m',  'cpu_lim': '250m', 'mem_req': '128Mi', 'mem_lim': '512Mi'},
+            'node-express':     {'cpu_req': '100m', 'cpu_lim': '300m', 'mem_req': '256Mi', 'mem_lim': '512Mi'},
+            'default':          {'cpu_req': '100m', 'cpu_lim': '200m', 'mem_req': '128Mi', 'mem_lim': '256Mi'},
         }
         
         profile = RESOURCE_PROFILES.get(svc_type, RESOURCE_PROFILES['default'])
