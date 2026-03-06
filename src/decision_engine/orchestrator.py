@@ -1,5 +1,6 @@
 from typing import List, Dict, Any
 import logging
+import os
 
 # Schemas
 from src.schemas import ProjectContext, Decision, StageResult
@@ -455,23 +456,24 @@ class V2Orchestrator:
             
             # Kubernetes specific
             elif stage_key == "kubernetes":
-                if "resources:" in content and "limits:" in content:
-                    score += 20  # resource limits
-                if "runasnonroot: true" in content or "runasuser:" in content:
-                    score += 15  # security context
-                if "readinessprobe:" in content or "livenessprobe:" in content:
-                    score += 10  # probes
-                if "networkpolicy" in content.lower():
-                    score += 5   # network policy presence
+                if "hpa" in content: score += 10
+                if "networkpolicy" in content: score += 10
+                if "poddisruptionbudget" in content: score += 5
+                if "requests:" in content and "limits:" in content: score += 15
+                if "livenessprobe" in content and "readinessprobe" in content: score += 10
             
-            # CI/CD specific
-            elif stage_key == "cicd":
+            # CI/CD specific (including per-service github_actions)
+            elif stage_key in ["cicd", "github_actions"]:
                 if "trivy" in content or "gitleaks" in content or "sonar" in content:
                     score += 20  # integrated security scans
                 if "permissions:" in content:
                     score += 10  # explicit permissions
                 if "needs:" in content:
                     score += 5   # job dependencies
+                if "docker/build-push-action@v6" in content:
+                    score += 5   # proper docker build/push
+                if "sed -i" in content and "deployment.yaml" in content:
+                    score += 5   # manifest image-tag update pattern
             
             # Penalties
             if "privileged: true" in content:
@@ -606,7 +608,8 @@ class V2Orchestrator:
                 elif stage_key == "docker_compose":
                     filename = f"outputs/shared/{filename}"
                 elif stage_key == "gitops_manifests":
-                    filename = f"outputs/shared/gitops/{filename}"
+                    # Even fallback ApplicationSet should live in gitops-repo for ArgoCD to watch
+                    filename = f"gitops-repo/argocd/{filename}"
                 else:
                     filename = f"outputs/docs/{filename}" if "doc" in stage_key else f"outputs/shared/{filename}"
                 

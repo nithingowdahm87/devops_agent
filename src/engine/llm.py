@@ -39,7 +39,7 @@ def _cfg(task_type="default"):
         "groq":        {"api_key": _e("GROQ_API_KEY"),        "model": _e("GROQ_MODEL",        groq_model),                          "base_url": _BASES["groq"]},
         "gemini":      {"api_key": _e("GOOGLE_API_KEY"),      "model": _e("GEMINI_MODEL",      "gemini-2.0-flash")},
         "nvidia":      {"api_key": _e("NVIDIA_API_KEY"),      "model": _e("NVIDIA_MODEL",      "meta/llama-3.1-70b-instruct"),       "base_url": _BASES["nvidia"]},
-        "cerebras":    {"api_key": _e("CEREBRAS_API_KEY"),    "model": _e("CEREBRAS_MODEL",    "llama-3.1-70b-versatile"),           "base_url": _BASES["cerebras"]},
+        "cerebras":    {"api_key": _e("CEREBRAS_API_KEY"),    "model": _e("CEREBRAS_MODEL",    "llama3.1-8b"),           "base_url": _BASES["cerebras"]},
         "openrouter":  {"api_key": _e("OPENROUTER_API_KEY"),  "model": _e("OPENROUTER_MODEL",  "anthropic/claude-3.5-sonnet"),       "base_url": _BASES["openrouter"]},
         "huggingface": {"api_key": _e("HUGGINGFACE_TOKEN"),   "model": _e("HUGGINGFACE_MODEL", "mistralai/Mistral-7B-Instruct-v0.3"),"base_url": _BASES["huggingface"]},
         "openai":      {"api_key": _e("OPENAI_API_KEY"),       "model": _e("OPENAI_MODEL",      "gpt-4o-mini"),                       "base_url": _BASES["openai"]},
