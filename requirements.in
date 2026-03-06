@@ -23,6 +23,14 @@ tenacity
 # boto3              # AWS Secrets Manager
 # hvac               # HashiCorp Vault
 
-# ─── Dev / Test ─────────────────────────────────────────────────
+# Dev / Test ─────────────────────────────────────────────────
 pytest>=7.0
 pytest-cov
+
+# Additional core requirements
+python-dotenv
+chromadb
+posthog<3.0.0
+numpy<2.0.0
+openai>=1.30.0
+google-generativeai>=0.5.0
