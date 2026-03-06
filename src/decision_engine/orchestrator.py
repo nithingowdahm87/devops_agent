@@ -335,10 +335,15 @@ class V2Orchestrator:
                         template += f"\n\nUSER CUSTOM INSTRUCTIONS (MUST FOLLOW):\n{custom_instructions}"
             
         # 2. Generate Drafts (Parallel)
+        svc = service_name or getattr(context, "project_name", "unknown")
+        
         prompt_context = {
             "context": context.raw_context_summary,
             "plan_summary": str(plan),
-            "svc_name": service_name or getattr(context, "project_name", "unknown")
+            # Expose both names so all templates work unconditionally:
+            "svc_name": svc,
+            "service_name": svc,
+            "project_name": getattr(context, "project_name", svc),
         }
         # Add specific fields
         prompt_context.update(context.model_dump())

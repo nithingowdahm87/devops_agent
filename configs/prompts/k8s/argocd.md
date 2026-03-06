@@ -39,4 +39,29 @@ FILENAME: apps/{{ svc_name }}/deployment.yaml
 <deployment_content>
 ```
 
-... (Repeat for all services)
+FILENAME: apps/{{ svc_name }}/service.yaml
+```yaml
+<service_content>
+```
+
+FILENAME: apps/{{ svc_name }}/hpa.yaml
+```yaml
+<hpa_content>
+```
+
+FILENAME: apps/{{ svc_name }}/networkpolicy.yaml
+```yaml
+<networkpolicy_content>
+```
+
+FILENAME: apps/{{ svc_name }}/pdb.yaml
+```yaml
+<pdb_content>
+```
+
+FILENAME: apps/{{ svc_name }}/resourcequota.yaml
+```yaml
+<resourcequota_content>
+```
+
+... (Repeat the `apps/{{ svc_name }}/*` files for all microservices exactly as discovered)
