@@ -628,6 +628,7 @@ def main():
     parser.add_argument("--gitops", action="store_true", help="Enable GitOps mode (per-service CI & manifests)")
     parser.add_argument("--gitops-repo", type=str, help="GitOps repository URL or path")
     parser.add_argument("--service", type=str, help="Target a specific microservice only")
+    parser.add_argument("--no-prompts", action="store_true", help="Run fully non-interactive (skip extra customization questions)")
     parser.add_argument("path", type=str, nargs="?", help="Project path")
     args = parser.parse_args()
 

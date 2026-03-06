@@ -19,12 +19,14 @@ _BASES = {
 # Each task type gets the best provider first, then falls back automatically.
 # Gemini is intentionally demoted behind Groq and OpenRouter until fully migrated to google.genai
 _TASK_ROUTES = {
-    "docker":      ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface", "openai"],
-    "k8s":         ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface", "openai"],
-    "ci":          ["openrouter", "groq",       "gemini",  "nvidia", "cerebras",   "huggingface", "openai"],
-    "heal":        ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface", "openai"],
-    "critique":    ["openrouter", "groq",       "gemini",  "nvidia", "cerebras",   "huggingface", "openai"],
-    "default":     ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface", "openai"],
+    "docker":          ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface", "openai"],
+    "k8s":             ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface", "openai"],
+    "ci":              ["openrouter", "groq",       "gemini",  "nvidia", "cerebras", "huggingface", "openai"],
+    "github_actions":  ["openrouter", "groq",       "gemini",  "nvidia", "cerebras", "huggingface", "openai"],
+    "gitops_manifests":["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface", "openai"],
+    "heal":            ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface", "openai"],
+    "critique":        ["openrouter", "groq",       "gemini",  "nvidia", "cerebras", "huggingface", "openai"],
+    "default":         ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface", "openai"],
 }
 
 def _e(k, d=""): return os.environ.get(k, d).strip()
