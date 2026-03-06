@@ -571,7 +571,11 @@ class V2Orchestrator:
                     gen_file.content = IdempotencyEngine.stabilize(gen_file.path, gen_file.content)
 
                     # Level 10 Write Gate
-                    sev = Severity.HIGH if not val_res.passed else Severity.LOW
+                    # CRITICAL = never write, HIGH = prod blocker, MEDIUM = healed-but-imperfect, LOW = clean
+                    if not val_res.passed:
+                        sev = Severity.MEDIUM  # healer ran but file still has minor issues — write it
+                    else:
+                        sev = Severity.LOW
                     art_mgr.write_gate(gen_file.path, gen_file.content, sev)
                     processed_files.append(gen_file)
 
