@@ -19,14 +19,14 @@ _BASES = {
 # Each task type gets the best provider first, then falls back automatically.
 # Gemini is intentionally demoted behind Groq and OpenRouter until fully migrated to google.genai
 _TASK_ROUTES = {
-    "docker":          ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface", "openai"],
-    "k8s":             ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface", "openai"],
-    "ci":              ["openrouter", "groq",       "gemini",  "nvidia", "cerebras", "huggingface", "openai"],
-    "github_actions":  ["openrouter", "groq",       "gemini",  "nvidia", "cerebras", "huggingface", "openai"],
-    "gitops_manifests":["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface", "openai"],
-    "heal":            ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface", "openai"],
-    "critique":        ["openrouter", "groq",       "gemini",  "nvidia", "cerebras", "huggingface", "openai"],
-    "default":         ["groq",       "openrouter", "gemini",  "cerebras", "nvidia", "huggingface", "openai"],
+    "docker":          ["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
+    "k8s":             ["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
+    "ci":              ["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
+    "github_actions":  ["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
+    "gitops_manifests":["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
+    "heal":            ["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
+    "critique":        ["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
+    "default":         ["groq",  "nvidia", "cerebras", "openrouter", "huggingface", "openai", "gemini"],
 }
 
 def _e(k, d=""): return os.environ.get(k, d).strip()
@@ -90,7 +90,7 @@ _CALLERS = {
 }
 
 # ── Public API ────────────────────────────────────────────────────────────────
-def call_llm(system_prompt: str, user_prompt: str, task_type: str = "default", max_tokens_budget: int = 2048) -> str:
+def call_llm(system_prompt: str, user_prompt: str, task_type: str = "default", max_tokens_budget: int = 1024) -> str:
     """
     Call LLM with task-aware routing and full fallback chain.
     task_type controls which provider is tried first.
