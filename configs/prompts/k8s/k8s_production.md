@@ -238,3 +238,14 @@ spec:
 
 ## OUTPUT
 Valid YAML separated by `---`. No markdown outside YAML. One document per resource.
+
+---
+
+## STEP 5 — DEPLOYMENT SCRIPT (deploy.sh)
+If generating a deployment script, you MUST follow these security and production-readiness rules:
+1. **Namespace Verification:** Before applying, check if namespace exists. Example: `kubectl get namespace <NS> || kubectl create namespace <NS>`
+2. **Context Verification:** Validate `kubectl config current-context` to prevent accidental production deployments.
+3. **Rollout Status:** After applying, you MUST wait for rollout: `kubectl rollout status deployment/<SVC> -n <NS>`
+4. **Port-Forward Security:** Never bind to 0.0.0.0. ALWAYS use `--address 127.0.0.1`.
+5. **PID Tracking:** Never use `pkill -f`. Track PIDs robustly: `kubectl port-forward ... & echo $! >> /tmp/port-forward.pids`
+6. **Dynamic Tags:** Use standard variables for tags, e.g., `--tag=${TAG:-latest}`.

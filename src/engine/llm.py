@@ -11,7 +11,7 @@ _BASES = {
     "nvidia":      "https://integrate.api.nvidia.com/v1",
     "cerebras":    "https://api.cerebras.ai/v1",
     "openrouter":  "https://openrouter.ai/api/v1",
-    "huggingface": "https://api-inference.huggingface.co/v1",
+    "huggingface": "https://router.huggingface.co/hf-inference/v1",
 }
 
 # ── Task-based model routing ──────────────────────────────────────────────────
@@ -27,14 +27,17 @@ _TASK_ROUTES = {
 
 def _e(k, d=""): return os.environ.get(k, d).strip()
 
-def _cfg():
+def _cfg(task_type="default"):
+    # Task-specific model overrides
+    groq_model = "mixtral-8x7b-32768" if task_type == "heal" else "llama-3.3-70b-versatile"
+    
     return {
-        "groq":        {"api_key": _e("GROQ_API_KEY"),       "model": _e("GROQ_MODEL",        "llama-3.3-70b-versatile"),           "base_url": _BASES["groq"]},
-        "gemini":      {"api_key": _e("GOOGLE_API_KEY"),      "model": _e("GEMINI_MODEL",       "gemini-2.0-flash-exp")},
-        "nvidia":      {"api_key": _e("NVIDIA_API_KEY"),      "model": _e("NVIDIA_MODEL",       "meta/llama-3.1-70b-instruct"),       "base_url": _BASES["nvidia"]},
-        "cerebras":    {"api_key": _e("CEREBRAS_API_KEY"),    "model": _e("CEREBRAS_MODEL",     "llama3.1-70b"),                      "base_url": _BASES["cerebras"]},
-        "openrouter":  {"api_key": _e("OPENROUTER_API_KEY"),  "model": _e("OPENROUTER_MODEL",   "anthropic/claude-3.5-sonnet"),       "base_url": _BASES["openrouter"]},
-        "huggingface": {"api_key": _e("HUGGINGFACE_TOKEN"),   "model": _e("HUGGINGFACE_MODEL",  "mistralai/Mistral-7B-Instruct-v0.3"),"base_url": _BASES["huggingface"]},
+        "groq":        {"api_key": _e("GROQ_API_KEY"),        "model": _e("GROQ_MODEL",        groq_model),                          "base_url": _BASES["groq"]},
+        "gemini":      {"api_key": _e("GOOGLE_API_KEY"),      "model": _e("GEMINI_MODEL",      "gemini-2.0-flash")},
+        "nvidia":      {"api_key": _e("NVIDIA_API_KEY"),      "model": _e("NVIDIA_MODEL",      "meta/llama-3.1-70b-instruct"),       "base_url": _BASES["nvidia"]},
+        "cerebras":    {"api_key": _e("CEREBRAS_API_KEY"),    "model": _e("CEREBRAS_MODEL",    "llama-3.1-70b-versatile"),           "base_url": _BASES["cerebras"]},
+        "openrouter":  {"api_key": _e("OPENROUTER_API_KEY"),  "model": _e("OPENROUTER_MODEL",  "anthropic/claude-3.5-sonnet"),       "base_url": _BASES["openrouter"]},
+        "huggingface": {"api_key": _e("HUGGINGFACE_TOKEN"),   "model": _e("HUGGINGFACE_MODEL", "mistralai/Mistral-7B-Instruct-v0.3"),"base_url": _BASES["huggingface"]},
     }
 
 # ── Provider health tracker (skips recently-failed providers) ─────────────────
@@ -88,7 +91,12 @@ def call_llm(system_prompt: str, user_prompt: str, task_type: str = "default") -
     max_tokens  = int(_e("LLM_MAX_TOKENS",    "8192"))
     timeout     = int(_e("LLM_TIMEOUT_SECONDS","45"))
     max_retries = int(_e("LLM_MAX_RETRIES",   "3"))
-    cfg_map     = _cfg()
+    
+    # Healing tasks need aggressive token budgeting to prevent TPD 429 errors
+    if task_type == "heal":
+        max_tokens = min(max_tokens, 2048)
+        
+    cfg_map     = _cfg(task_type)
     errors: list[str] = []
 
     for provider in order:

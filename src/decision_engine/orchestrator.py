@@ -183,10 +183,20 @@ class V2Orchestrator:
         # 6. Run Stages (Level 10 Deterministic Sequence)
         all_artifacts = {}
         for stage in ["dockerfile", "docker_compose", "kubernetes", "cicd"]:
-             res_files = self._execute_stage(stage.replace("_", " "), stage, project_path, context, plan, environment=environment, no_llm=no_llm)
-             if res_files:
-                 for f in res_files:
-                     all_artifacts[f.path] = f.content
+             try:
+                 res_files = self._execute_stage(stage.replace("_", " "), stage, project_path, context, plan, environment=environment, no_llm=no_llm)
+                 if res_files:
+                     for f in res_files:
+                         all_artifacts[f.path] = f.content
+             except Exception as stage_e:
+                 logger.error("Stage %s failed: %s", stage, stage_e)
+                 print(f"⚠️  Stage {stage} failed due to LLM exhaustion. Generating minimal fallback...")
+                 if stage == "kubernetes":
+                     # Create a dummy manifest to prevent downstream crashes
+                     all_artifacts["k8s/fallback.yaml"] = "# Fallback Kubernetes Manifest\n# Manual generation required."
+                 elif stage == "cicd":
+                     all_artifacts[".github/workflows/fallback.yml"] = "# Fallback CI/CD\n# Manual generation required."
+
 
         # 7. Level 10 Post-Generation Stage (Audit & Manifest)
         print("\n--- Stage 5: Global Integrity Audit ---")
@@ -296,8 +306,15 @@ class V2Orchestrator:
             template += f"\n\nCRITICAL: Generate a separate Dockerfile for EACH of these {len(context.microservice_dirs)} services:\n{dirs_str}\nUse FILENAME: <dir>/Dockerfile for each."
         
         if stage_key == "docker_compose" and context.microservice_dirs:
-            svc_str = "\n".join([f"- {d} (port {context.microservice_details.get(d, {}).get('ports', ['8080'])[0]})" for d in context.microservice_dirs])
-            template += f"\n\nCRITICAL: Generate docker-compose.yml listing ALL {len(context.microservice_dirs)} services:\n{svc_str}\nInclude postgres and redis if referenced. Use FILENAME: docker-compose.yml"
+            svc_details = []
+            for d in context.microservice_dirs:
+                det = context.microservice_details.get(d, {})
+                ports = det.get('ports', ['8080'])
+                db_req = det.get('databases', [])
+                svc_details.append(f"- {d}: ports {ports}, databases: {db_req}")
+            
+            svc_str = "\n".join(svc_details)
+            template += f"\n\nCRITICAL: Generate docker-compose.yml listing ALL {len(context.microservice_dirs)} services explicitly:\n{svc_str}\nInclude postgres and redis if referenced. Do NOT merge them. Each service MUST have its own block under `services:`. Use FILENAME: docker-compose.yml"
 
         if stage_key == "kubernetes" and context.microservice_dirs:
             svc_str = ", ".join(context.microservice_dirs)
