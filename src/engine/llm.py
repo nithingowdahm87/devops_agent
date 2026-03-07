@@ -52,7 +52,7 @@ def _cfg(task_type: str = "default") -> dict:
     return {
         "ollama": {
             "api_key":  _e("OLLAMA_API_KEY", "ollama"),
-            "model":    _e("OLLAMA_MODEL", "llama3.2:3b"),
+            "model":    _e("OLLAMA_MODEL", "llama3.2:1b"),         # good default for 8 GB RAM
             "base_url": _BASES["ollama"],
         },
     }
