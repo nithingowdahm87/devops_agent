@@ -8,8 +8,8 @@ from src.engine.llm import call_llm
 
 log = logging.getLogger(__name__)
 
-# Hard cap: ~2800 tokens leaving room for output + system prompt within 8192 ctx
-_MAX_PROMPT_CHARS = int(os.environ.get("LOCAL_MAX_PROMPT_CHARS", "12000"))
+# Hard cap: ~2000 tokens leaving room for output + system prompt
+_MAX_PROMPT_CHARS = int(os.environ.get("LOCAL_MAX_PROMPT_CHARS", "8000"))
 
 
 def _artifact_type(task_type: str) -> str:
@@ -81,6 +81,7 @@ class LLMGenerator:
             full_prompt += f"\n\nRAG BEST PRACTICES:\n{rag_snippet}"
 
         # 5. Hard cap — must come LAST after all appends
+        log.info("Prompt length for %s: %d chars", task_type, len(full_prompt))
         if len(full_prompt) > _MAX_PROMPT_CHARS:
             log.warning(
                 "Truncating prompt from %d → %d chars (llama.cpp ctx guard)",
