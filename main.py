@@ -674,13 +674,19 @@ def main():
     logger.info("Context loaded: %s app", context.language, extra={"stage": "Analysis"})
     print(f"✅ Context Loaded: {context.language} app, Ports: {context.ports}")
     
+    # Auto-select V2 Auto-Pilot if no prompt mode is enabled
+    auto_select = getattr(args, "no_prompts", False)
+    
     while True:
-        print("\n--- DevOps AI Agent (v12.0) ---")
-        print("1. 🧠  Start Automated DevOps Generation (Auto-Pilot / V2)")
-        print("2. 🛠️   Run Specific Stages Manually (Legacy)")
-        print("q. Exit")
-        
-        choice = input("Select: ").strip().lower()
+        if auto_select:
+            choice = '1'
+        else:
+            print("\n--- DevOps AI Agent (v12.0) ---")
+            print("1. 🧠  Start Automated DevOps Generation (Auto-Pilot / V2)")
+            print("2. 🛠️   Run Specific Stages Manually (Legacy)")
+            print("q. Exit")
+            
+            choice = input("Select: ").strip().lower()
         
         if choice == '1':
             orchestrator = V2Orchestrator()

@@ -790,7 +790,13 @@ class V2Orchestrator:
         # Add a custom 'metadata' field for resource profiles
         ctx.service_path = svc_detail.get("path", service_name)   # ensure code_analysis_agent fills 'path'
         ctx.resources = profile
-        ctx.raw_context_summary = f"Isolated Context for {service_name}\nResources: {profile}\nOriginal context follows:\n{ctx.raw_context_summary}"
+        
+        # TRUNCATE to ~12000 chars to avoid llama.cpp context overflow!
+        truncated_context = ctx.raw_context_summary[:12000]
+        if len(ctx.raw_context_summary) > 12000:
+            truncated_context += "\n...[TRUNCATED TO PREVENT CONTEXT OVERFLOW]..."
+            
+        ctx.raw_context_summary = f"Isolated Context for {service_name}\nResources: {profile}\nOriginal context follows:\n{truncated_context}"
         
         return ctx
 
