@@ -15,7 +15,8 @@ from src.decision_engine.confidence.action_router import decide_action
 
 def test_prompt_loader():
     print("Testing PromptLoader...")
-    p = load_prompt("dockerfile", "writer_a_generalist")
+    # Stage=docker, role=writer_a matches configs/prompts/docker/writer_a.md
+    p = load_prompt("docker", "writer_a")
     assert "Senior DevOps Engineer" in p
     print("✅ PromptLoader passed")
 

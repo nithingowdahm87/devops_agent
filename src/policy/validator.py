@@ -171,11 +171,14 @@ class PolicyValidator:
         violations = []
         content_lower = content.lower()
 
-        if stage == "docker":
+        # Normalise stage so "CI/CD", "cicd", and "ci-cd" all match
+        stage_key = stage.replace("/", "").replace("-", "").lower()
+
+        if stage_key == "docker":
             violations.extend(self._check_dockerfile(content, content_lower))
-        elif stage == "k8s":
+        elif stage_key == "k8s":
             violations.extend(self._check_k8s(content, content_lower))
-        elif stage == "cicd":
+        elif stage_key == "cicd":
             violations.extend(self._check_ci(content, content_lower))
 
         return violations

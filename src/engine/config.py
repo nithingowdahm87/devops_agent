@@ -51,3 +51,6 @@ HUGGINGFACE_MODEL  = _e("HUGGINGFACE_MODEL",  "mistralai/Mistral-7B-Instruct-v0.
 # ── Pipeline mode ─────────────────────────────────────────────────────────────
 PIPELINE_ENV       = _e("PIPELINE_ENV", "prod")
 DEBUG              = _e("DEBUG", "false").lower() == "true"
+
+# ── Default environment ───────────────────────────────────────────────────────
+DEFAULT_ENVIRONMENT = _e("PIPELINE_ENV", "dev")
