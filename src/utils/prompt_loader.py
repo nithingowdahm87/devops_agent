@@ -48,6 +48,7 @@ def render_prompt(template: str, context: dict) -> str:
         "service_path",
         "language",
         "resources",
+        "rag_best_practices",
     ]
 
     for key in keys_to_replace:

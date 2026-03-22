@@ -330,3 +330,4 @@ jobs:
 # | SONAR_TOKEN       | SonarCloud project token             |
 # | APP_URL           | App URL for OWASP ZAP target         |
 # =============================================================================
+{rag_best_practices}

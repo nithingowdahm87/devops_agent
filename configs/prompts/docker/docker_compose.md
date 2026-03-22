@@ -229,3 +229,4 @@ services:
 FILENAME: docker-compose.yml
 FILENAME: .env.example  (all required vars with placeholder values)
 FILENAME: nginx.conf    (if nginx service included)
+{rag_best_practices}

@@ -285,3 +285,4 @@ FILENAME: <path>/.dockerignore
 ```
 <content>
 ```
+{rag_best_practices}

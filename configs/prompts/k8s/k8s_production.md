@@ -250,3 +250,4 @@ If generating a deployment script, you MUST follow these security and production
 4. **Port-Forward Security:** Never bind to 0.0.0.0. ALWAYS use `--address 127.0.0.1`.
 5. **PID Tracking:** Never use `pkill -f`. Track PIDs robustly: `kubectl port-forward ... & echo $! >> /tmp/port-forward.pids`
 6. **Dynamic Tags:** Use standard variables for tags, e.g., `--tag=${TAG:-latest}`.
+{rag_best_practices}
