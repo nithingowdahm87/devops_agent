@@ -1,14 +1,14 @@
 """
-LLM Router — Ollama-only local provider.
+LLM Router — llama.cpp local provider.
 
-Uses a single OpenAI-compatible endpoint exposed by Ollama at
-http://localhost:11434/v1/chat/completions.
+Uses a single OpenAI-compatible endpoint exposed by llama-server at
+http://127.0.0.1:8080/v1/chat/completions.
 
 To use:
-  1. Install Ollama:  curl -fsSL https://ollama.com/install.sh | sh
-  2. Pull a small model (good for 8 GB RAM):
-       ollama pull llama3.2:3b
-  3. Set OLLAMA_MODEL in .env (e.g. llama3.2:3b)
+  1. Build llama.cpp and run:
+       llama-server -m ~/models/qwen-coder-1.5b.gguf \
+         --host 127.0.0.1 --port 8080 -c 4096 -t 4
+  2. Set LLAMACPP_MODEL in .env to the model id (check GET /v1/models)
 """
 
 from __future__ import annotations
@@ -20,52 +20,55 @@ import random
 
 log = logging.getLogger(__name__)
 
-# ── Single base URL for local Ollama ───────────────────────────────────────────
+# ── Single base URL for local llama.cpp ──────────────────────────────────────
 _BASES = {
-    "ollama": "http://localhost:11434/v1",
+    "llamacpp": "http://127.0.0.1:8080/v1",
 }
 
 def _e(k: str, d: str = "") -> str:
     return os.environ.get(k, d).strip()
 
 # ── Minimal task routing (kept for API compatibility) ─────────────────────────
-# All task types resolve to the same single provider: "ollama".
+# All task types resolve to the same single provider: "llamacpp".
 _TASK_ROUTES = {
-    "docker":          ["ollama"],
-    "k8s":             ["ollama"],
-    "cicd":            ["ollama"],
-    "github_actions":  ["ollama"],
-    "gitops_manifests":["ollama"],
-    "heal":            ["ollama"],
-    "critique":        ["ollama"],
-    "default":         ["ollama"],
+    "docker":          ["llamacpp"],
+    "k8s":             ["llamacpp"],
+    "cicd":            ["llamacpp"],
+    "github_actions":  ["llamacpp"],
+    "gitops_manifests":["llamacpp"],
+    "heal":            ["llamacpp"],
+    "critique":        ["llamacpp"],
+    "default":         ["llamacpp"],
 }
 
 def _cfg(task_type: str = "default") -> dict:
     """
-    Configuration for the single Ollama provider.
+    Configuration for the single llama.cpp provider.
 
-    OLLAMA_MODEL is passed directly to Ollama's /v1/chat/completions endpoint.
-    Any non-empty OLLAMA_API_KEY works; Ollama ignores it but the OpenAI client
-    requires a value.
+    LLAMACPP_MODEL is passed directly to llama-server's /v1/chat/completions
+    endpoint.  The model id must match what GET /v1/models returns (usually the
+    GGUF filename stem, e.g. "qwen-coder-1.5b.gguf").
+    Any non-empty LLAMACPP_API_KEY works; llama-server ignores it but the
+    OpenAI client requires a value.
     """
     return {
-        "ollama": {
-            "api_key":  _e("OLLAMA_API_KEY", "ollama"),
-            "model":    _e("OLLAMA_MODEL", "llama3.2:1b"),         # good default for 8 GB RAM
-            "base_url": _BASES["ollama"],
+        "llamacpp": {
+            "api_key":  _e("LLAMACPP_API_KEY", "none"),
+            "model":    _e("LLAMACPP_MODEL", "qwen-coder-1.5b.gguf"),
+            "base_url": _BASES["llamacpp"],
         },
     }
 
-# ── Health check ───────────────────────────────────────────────────────────────
+# ── Health check ──────────────────────────────────────────────────────────────
 def _is_healthy() -> bool:
     """
-    Ollama-specific health check.
+    llama.cpp health check.
 
-    Returns True if a TCP connection to localhost:11434 can be established.
+    Returns True if a TCP connection to 127.0.0.1:8080 can be established,
+    i.e. llama-server is running.
     """
     try:
-        socket.create_connection(("127.0.0.1", 11434), timeout=1)
+        socket.create_connection(("127.0.0.1", 8080), timeout=1)
         return True
     except OSError:
         return False
@@ -73,9 +76,9 @@ def _is_healthy() -> bool:
 # ── Caller implementation (OpenAI-compatible) ─────────────────────────────────
 def _call_openai_compat(cfg, system, user, temperature, max_tokens, timeout):
     """
-    Generic OpenAI-compatible caller used for Ollama.
+    Generic OpenAI-compatible caller used for llama.cpp.
 
-    Ollama exposes a drop-in /v1/chat/completions endpoint.
+    llama-server exposes a drop-in /v1/chat/completions endpoint.
     """
     from openai import OpenAI
 
@@ -93,7 +96,7 @@ def _call_openai_compat(cfg, system, user, temperature, max_tokens, timeout):
     return resp.choices[0].message.content.strip()
 
 _CALLERS = {
-    "ollama": _call_openai_compat,
+    "llamacpp": _call_openai_compat,
 }
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -104,10 +107,10 @@ def call_llm(
     max_tokens_budget: int = 1024,
 ) -> str:
     """
-    Call local Ollama with a task-aware interface.
+    Call local llama.cpp with a task-aware interface.
 
     task_type is kept for backward compatibility with previous multi-provider
-    routing, but all routes now resolve to the single "ollama" provider.
+    routing, but all routes now resolve to the single "llamacpp" provider.
     """
 
     order = _TASK_ROUTES.get(task_type, _TASK_ROUTES["default"])
@@ -125,12 +128,13 @@ def call_llm(
 
     if not _is_healthy():
         raise RuntimeError(
-            "Ollama server is not reachable on localhost:11434.\n"
-            "Start it with:  ollama serve  (or run any model once, e.g. "
-            "`ollama run llama3.2:3b`)."
+            "llama-server is not reachable on 127.0.0.1:8080.\n"
+            "Start it with:\n"
+            "  llama-server -m ~/models/qwen-coder-1.5b.gguf \\\n"
+            "    --host 127.0.0.1 --port 8080 -c 4096 -t 4"
         )
 
-    provider = "ollama"
+    provider = "llamacpp"
     cfg = cfg_map[provider]
     caller = _CALLERS[provider]
 
@@ -154,4 +158,4 @@ def call_llm(
             if attempt < max_retries:
                 time.sleep(wait)
 
-    raise RuntimeError("Ollama failed:\n" + "\n".join(f"  • {e}" for e in errors))
+    raise RuntimeError("llama.cpp failed:\n" + "\n".join(f"  • {e}" for e in errors))
