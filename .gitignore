@@ -31,3 +31,4 @@ Thumbs.db
 # Linter output
 .hadolint_cache/
 trivy-*.sarif
+.chroma_db/
