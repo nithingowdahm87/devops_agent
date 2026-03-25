@@ -9,7 +9,7 @@ from src.engine.llm import call_llm
 log = logging.getLogger(__name__)
 
 # Hard cap: ~750 tokens leaving room for output + system prompt
-_MAX_PROMPT_CHARS = int(os.environ.get("LOCAL_MAX_PROMPT_CHARS", "3000"))
+_MAX_PROMPT_CHARS = int(os.environ.get("LOCAL_MAX_PROMPT_CHARS", "2500"))
 
 
 def _artifact_type(task_type: str) -> str:

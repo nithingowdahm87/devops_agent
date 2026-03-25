@@ -117,11 +117,11 @@ def call_llm(
     temperature = float(_e("LLM_TEMPERATURE", "0.1"))
 
     # Respect user-configured token cap
-    env_max = int(os.environ.get("LLM_MAX_TOKENS", "512"))
+    env_max = int(os.environ.get("LLM_MAX_TOKENS", "256"))
     max_tokens = min(max_tokens_budget, env_max)
 
-    timeout = int(_e("LLM_TIMEOUT_SECONDS", "90"))
-    max_retries = int(_e("LLM_MAX_RETRIES", "2"))
+    timeout = int(_e("LLM_TIMEOUT_SECONDS", "180"))
+    max_retries = int(_e("LLM_MAX_RETRIES", "1"))
 
     cfg_map = _cfg(task_type)
     errors: list[str] = []
