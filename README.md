@@ -91,8 +91,11 @@ pip install -r requirements.txt
 
 ### Configure
 ```bash
-cp .env.example .env
-# Edit .env — set your OLLAMA_MODEL and CI/CD secrets. Never commit .env.
+# 1. Decode the provided base64 environment variables
+base64 -d .env.b64 > .env
+
+# 2. Initialize the local RAG Database (seeds prompts into ChromaDB)
+python3 -m scripts.seed_rag_from_prompts
 ```
 
 ### Run
