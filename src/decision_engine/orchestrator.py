@@ -90,7 +90,7 @@ class V2Orchestrator:
                 logger.warning(f"Failed to init {name} client: {e}. Using Mock.")
                 self.generators.append(LLMGenerator(MockClient(name=f"Mock-{name}"), f"Mock-{name}"))
         
-    def run_pipeline(self, project_path: str, context: ProjectContext, environment: str = "dev", no_llm: bool = False, gitops: bool = False, gitops_repo: str = None, target_service: str = None, publisher=None, no_prompts: bool = False):
+    def run_pipeline(self, project_path: str, context: ProjectContext, environment: str = "dev", no_llm: bool = False, gitops: bool = False, gitops_repo: str = None, target_service: str = None, publisher=None, no_prompts: bool = False, no_heal: bool = False):
         """
         Main entry point for V2 Pipeline.
         """
@@ -229,7 +229,7 @@ class V2Orchestrator:
                 for svc in services:
                     try:
                         svc_ctx = per_service_contexts[svc]
-                        res_files = self._execute_stage(f"{stage.replace('_', ' ')} ({svc})", stage, project_path, svc_ctx, plan, environment=environment, no_llm=no_llm, service_name=svc, no_prompts=no_prompts)
+                        res_files = self._execute_stage(f"{stage.replace('_', ' ')} ({svc})", stage, project_path, svc_ctx, plan, environment=environment, no_llm=no_llm, service_name=svc, no_prompts=no_prompts, no_heal=no_heal)
                         if res_files:
                             for f in res_files:
                                 all_artifacts[f.path] = f.content
@@ -246,7 +246,7 @@ class V2Orchestrator:
                                 resource_map[svc] = svc_ctx.resources
                         setattr(context, "resource_profiles", resource_map)
                         
-                    res_files = self._execute_stage(stage.replace("_", " "), stage, project_path, context, plan, environment=environment, no_llm=no_llm, no_prompts=no_prompts)
+                    res_files = self._execute_stage(stage.replace("_", " "), stage, project_path, context, plan, environment=environment, no_llm=no_llm, no_prompts=no_prompts, no_heal=no_heal)
                     if res_files:
                         for f in res_files:
                             all_artifacts[f.path] = f.content
@@ -297,7 +297,7 @@ class V2Orchestrator:
         sys.exit(0)
 
         
-    def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan, environment: str = "dev", no_llm: bool = False, service_name: str = None, no_prompts: bool = False):
+    def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan, environment: str = "dev", no_llm: bool = False, service_name: str = None, no_prompts: bool = False, no_heal: bool = False):
         print(f"\n--- Stage: {display_name} ---")
         
         # 1. Load Prompts
@@ -576,7 +576,7 @@ class V2Orchestrator:
                         val_res.passed = False
                         val_res.errors.extend([f"POLICY: {msg}" for sev, msg in policy_findings])
 
-                    if not val_res.passed:
+                    if not no_heal and not val_res.passed:
                         print(f"  [!] Validation failed for {rel_path}. Healing...")
                         gen_file = self.healer.heal(gen_file, val_res.errors)
                         # Final re-validate
@@ -642,7 +642,7 @@ class V2Orchestrator:
                     val_res.passed = False
                     val_res.errors.extend([f"POLICY: {msg}" for sev, msg in policy_findings])
 
-                if not val_res.passed:
+                if not no_heal and not val_res.passed:
                     gen_file = self.healer.heal(gen_file, val_res.errors)
                 
                 # Level 10 Idempotency (Gap 3)

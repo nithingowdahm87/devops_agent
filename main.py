@@ -629,6 +629,7 @@ def main():
     parser.add_argument("--gitops-repo", type=str, help="GitOps repository URL or path")
     parser.add_argument("--service", type=str, help="Target a specific microservice only")
     parser.add_argument("--no-prompts", action="store_true", help="Run fully non-interactive (skip extra customization questions)")
+    parser.add_argument("--no-heal", action="store_true", help="Skip automated healing/validation retries (faster but less polished)")
     parser.add_argument("--llm-mode", type=str, choices=["local", "kimchi", "remote"],
                         default=os.environ.get("LLM_PROVIDER_MODE", "kimchi"),
                         help="LLM provider mode: local (llama.cpp), kimchi (Kimchi CLI API), or remote (Groq/Gemini/etc.)")
@@ -707,6 +708,7 @@ def main():
                 target_service=args.service,
                 publisher=publisher,
                 no_prompts=getattr(args, "no_prompts", False),
+                no_heal=args.no_heal,
             )
         elif choice == '2':
             run_manual_menu(project_path, context, audit, publisher, run_id)
