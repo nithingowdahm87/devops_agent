@@ -1,6 +1,6 @@
 # DevOps Agent v2.0.0 (GitOps Ready)
 
-Production-grade AI agent that compiles Dockerfiles, Kubernetes manifests, and CI/CD pipelines from raw codebases. Deterministic compiler architecture with a local Ollama LLM and a production GitOps generator.
+Production-grade AI agent that compiles Dockerfiles, Kubernetes manifests, and CI/CD pipelines from raw codebases. Deterministic compiler architecture with multi-provider LLM routing and a production GitOps generator.
 
 ---
 
@@ -16,8 +16,8 @@ Codebase Input
 │
 ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Stage 2 — LLM Router (Ollama Local)                        │
-│ Ollama (llama3.2:3b) → localhost:11434/v1                   │
+│ Stage 2 — LLM Router (Multi-Provider)                      │
+│ Kimchi CLI API / Local Ollama / Remote APIs (fallback chain)│
 └────────────────────────┬────────────────────────────────────┘
 │
 ▼
@@ -40,26 +40,34 @@ Codebase Input
 
 ---
 
-## Local LLM (Ollama-Only)
+## LLM Provider Modes
 
-This agent now uses a **single local LLM provider**: [Ollama](https://ollama.com), via its OpenAI-compatible API at `http://localhost:11434/v1`.
+The agent supports three LLM modes via `--llm-mode`. Use the mode that best fits your infrastructure and security requirements.
 
-There are **no remote providers** (Groq, OpenAI, Gemini, etc.) in the runtime path anymore — every generation call goes through the local Ollama server.
+| Mode | Provider | Setup | Speed |
+|------|----------|-------|-------|
+| `kimchi` (default) | Kimchi CLI API | Auto-reads `~/.config/kimchi/harness/auth.json` | ~10-60s |
+| `local` | llama.cpp / Ollama | Requires local model server | ~30-120s |
+| `remote` | Groq / Gemini / Cerebras / NVIDIA / OpenRouter | Requires API keys in `.env` | ~5-30s |
 
-### Why local only?
+### Kimchi CLI API (Recommended)
 
-- Zero cloud cost, no API keys.
-- Works fully offline once the model is pulled.
-- Deterministic behavior on a single machine (no cross-DC latency or provider drift).
+The default mode uses the Kimchi CLI API, which auto-detects your existing authentication token from `~/.config/kimchi/harness/auth.json`. No manual API key management required.
 
-### Recommended models for 8 GB RAM
+**Supported models:**
+- `kimi-k2.5`
+- `kimi-k2.6`
+- `minimax-m2.5`
+- `minimax-m2.7`
+- `nemotron-3-super-fp4`
 
-For an 8 GB RAM laptop (WSL + Docker), use **lightweight Llama 3.2** models:
+### Local Mode
 
-- `llama3.2:3b` — default in `.env.example`, good quality and fits 8 GB easily.
-- `llama3.2:1b` — extra-light if RAM is very tight or you want maximum speed.
+Uses a local llama.cpp server or Ollama at `http://localhost:8080/v1`. Fully offline once the model is downloaded.
 
-Pull one model before running the agent:
+**Recommended models for 8 GB RAM:**
+
+For an 8 GB RAM laptop (WSL + Docker), use lightweight Llama 3.2 models:
 
 ```bash
 # Install Ollama (Linux/Mac)
@@ -71,14 +79,26 @@ ollama pull llama3.2:3b
 # ollama pull llama3.2:1b
 ```
 
-The model name you pull must match the `OLLAMA_MODEL` value in your `.env` file.
+The model name must match the `OLLAMA_MODEL` value in your `.env` file.
+
+### Remote Mode
+
+Uses external API providers. Set API keys in your `.env` file:
+
+- `GROQ_API_KEY`
+- `GOOGLE_API_KEY`
+- `CEREBRAS_API_KEY`
+- `NVIDIA_API_KEY`
+- `OPENROUTER_API_KEY`
+
+Remote mode automatically falls back through the provider chain if one is unavailable.
 
 ---
 
 ## Quick Start
 
 ### Prerequisites
-- Python 3.12+
+- Python 3.10+
 - Local linters: `hadolint`, `kubeconform`, `shellcheck`
 
 ### Install
@@ -91,8 +111,9 @@ pip install -r requirements.txt
 
 ### Configure
 ```bash
-# 1. Decode the provided base64 environment variables
-base64 -d .env.b64 > .env
+# 1. Copy and edit the environment template
+cp .env.example .env
+# Edit .env and set your API keys or LLM mode preferences
 
 # 2. Initialize the local RAG Database (seeds prompts into ChromaDB)
 python3 -m scripts.seed_rag_from_prompts
@@ -100,40 +121,55 @@ python3 -m scripts.seed_rag_from_prompts
 
 ### Run
 ```bash
+# Using Kimchi CLI API (default — no key needed if logged in)
+./run_agent.sh --llm-mode kimchi /path/to/project
+
+# Using local Ollama/llama.cpp
+./run_agent.sh --llm-mode local /path/to/project
+
+# Using remote APIs (requires keys in .env)
+./run_agent.sh --llm-mode remote /path/to/project
+
 # Production mode (strict policy enforcement)
-./run_agent.sh --env prod
+./run_agent.sh --llm-mode kimchi --env prod /path/to/project
 
 # Dev mode (relaxed policies)
-./run_agent.sh
+./run_agent.sh --llm-mode kimchi /path/to/project
 
 # Non-interactive (no extra customization questions)
-./run_agent.sh --no-prompts
+./run_agent.sh --llm-mode kimchi --no-prompts /path/to/project
 
 # Zero-LLM deterministic template mode
-./run_agent.sh --no-llm
+./run_agent.sh --no-llm /path/to/project
 
 # GitOps Mode (Automated Repo Setup + PRs)
-./run_agent.sh --gitops --gitops-repo https://github.com/org/gitops-infra
+./run_agent.sh --llm-mode kimchi --gitops --gitops-repo https://github.com/org/gitops-infra /path/to/project
 
 # Targeted Single-Service Run
-./run_agent.sh --service auth-service --gitops
+./run_agent.sh --llm-mode kimchi --service auth-service --gitops /path/to/project
 ```
 
 ## GitOps Mode
+
 When `--gitops` is enabled, the agent orchestrates a full GitOps transformation:
+
 1. **Per-Service CI**: Generates `.github/workflows/{{svc}}-ci.yml` with scoped path triggers.
 2. **ArgoCD Support**: Generates `ApplicationSet` and namespaced Kubernetes files.
 3. **Multi-Repo Sync**: Clones/Pulls the `--gitops-repo` and automatically creates PRs or commits if `GITHUB_TOKEN` is present.
 4. **Isolated Context**: Each service receives its own resource profile (CPU/RAM) and metadata.
 
 ### Required Secrets for GitOps automation
-To fully utilize the V2 proactive PR integration and CI workflows, ensure these environment variables are set during generation, or added to your actual target repository:
+
+To fully utilize the v2.0.0 proactive PR integration and CI workflows, ensure these environment variables are set during generation, or added to your actual target repository:
+
 - `GITHUB_TOKEN`: For the agent to automatically push to the GitOps repo and open a PR.
 - `GITHUB_REPO`: The target repo for the GitOps state (e.g. `your-username/my-infra-repo`).
 - `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`: Required by the generated CI actions to publish your built images.
 
 ## Directory Hierarchy
+
 Generated files are organized in `outputs/` to support monorepos cleanly:
+
 ```text
 outputs/
 ├── per-service/          # Dockerfiles, CI workflows, and K8s manifests
@@ -144,6 +180,7 @@ outputs/
 ```
 
 ## Prompt Standards
+
 All prompts follow a 4-step structure used by production DevSecOps teams:
 
 1. **Analyze** — inspect project files before writing a single line
@@ -161,19 +198,37 @@ Prompts are stored in `configs/prompts/` and are loaded by the RAG engine at run
 | docs/secrets.md | secrets-required.md | Dependency mapping from code analysis |
 
 ## Security
+
 - API keys are loaded from `.env` only — never hardcoded in source
 - `.env` is blocked by `.gitignore`
+- Path-traversal protection in file operations
+- API key security — auto-reads Kimchi CLI auth token from `~/.config/kimchi/harness/auth.json`
 - Containers run as UID 10001 (non-root, not a system UID)
 - No debugging tools (curl, wget, bash) in runtime images
 - All CI pipelines run Gitleaks, Trivy FS, Trivy Image, and OWASP ZAP scans
 - SARIF results uploaded to GitHub Security tab on every run
+- Artifact output sanitization — strips reasoning text from generated configs
 
 ## Requirements
+
 ```text
-openai>=1.0.0
-google-generativeai>=0.8.0
+langchain
+langgraph
+langchain-google-genai
+requests
+pyyaml
+pydantic>=2.0
 python-dotenv>=1.0.0
-pyyaml>=6.0
-jsonschema>=4.0
-requests>=2.31
+requests>=2.31.0
 ```
+
+---
+
+## Changelog v2.0.0
+
+- Multi-provider LLM routing (Kimchi / Local / Remote)
+- API key security — auto-reads Kimchi CLI auth token
+- Path-traversal protection in file operations
+- Artifact output sanitization — strips reasoning text from generated configs
+- 120s health check timeout support for Cloudflare-proxied APIs
+- Graceful fallback when chromadb is not installed

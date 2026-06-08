@@ -8,9 +8,10 @@ from src.engine.llm import call_llm
 
 log = logging.getLogger(__name__)
 
-# Hard cap: ~2000 tokens leaving room for output + system prompt
-# Kimchi (kimi-k2.6) handles 256k context; keep prompt under ~8k chars for speed
-_MAX_PROMPT_CHARS = int(os.environ.get("LOCAL_MAX_PROMPT_CHARS", "8000"))
+# Hard cap: ~1500 tokens leaving room for output + system prompt
+# kimi-k2.5 handles 256k context but Cloudflare proxy limits to 120s;
+# keep prompt under ~5k chars to stay within timeout and leave room for output.
+_MAX_PROMPT_CHARS = int(os.environ.get("LOCAL_MAX_PROMPT_CHARS", "5000"))
 
 
 def _artifact_type(task_type: str) -> str:
