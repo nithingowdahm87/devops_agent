@@ -32,3 +32,5 @@ Thumbs.db
 .hadolint_cache/
 trivy-*.sarif
 .chroma_db/
+.env.b64
+.env.b64

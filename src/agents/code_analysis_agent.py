@@ -38,6 +38,7 @@ class CodeAnalysisAgent:
         
         # 3. specific heuristics
         self._detect_node(analysis)
+        self._detect_static_html(analysis)
         self._detect_python(analysis)
         self._detect_ports(analysis)
         self._detect_env_vars(analysis)
@@ -54,35 +55,64 @@ class CodeAnalysisAgent:
         
         return context
 
+    # Real Node.js frameworks that justify a Node.js Dockerfile
+    _NODE_FRAMEWORKS = {
+        "express", "fastify", "koa", "hapi", "@hapi/hapi", "@nestjs/core",
+        "nestjs", "micro", "next", "nuxt", "svelte", "angular", "@angular/core",
+        "react", "react-dom", "vue", "vuex", "pinia", "svelte", "@sveltejs/kit",
+        "graphql", "apollo-server", "apollo-server-express", "@apollo/server",
+        "prisma", "mongoose", "socket.io", "bull", "bullmq", " Agenda",
+        "jest", "mocha", "puppeteer", "playwright", "cypress", "webpack",
+        "vite", "esbuild", "tsx", "ts-node", "nodemon", "pm2", "forever",
+    }
+
     def _detect_node(self, analysis: dict):
-        # Scan recursively
+        """Detect Node.js projects by checking for actual Node.js dependencies."""
+        found_real_node = False
         for root, dirs, files in os.walk(self.project_path):
-            if "node_modules" in dirs: 
+            if "node_modules" in dirs:
                 dirs.remove("node_modules")
-            
+
             if "package.json" in files:
-                analysis["language"] = "javascript/node" # At least one node app found
                 pkg_path = os.path.join(root, "package.json")
                 try:
                     data = json.loads(read_file(pkg_path))
                     deps = list(data.get("dependencies", {}).keys())
-                    analysis["dependencies"].extend(deps)
-                    
-                    # Merge scripts (prefix with folder name to avoid collision?)
-                    # For now just flat merge, last wins or maybe ignore scripts for deep files
-                    if root == self.project_path:
-                        analysis["scripts"] = data.get("scripts", {})
-                        
-                    if "express" in deps:
-                        analysis["frameworks"].append("express")
-                    if "react" in deps:
-                        analysis["frameworks"].append("react")
+                    dev_deps = list(data.get("devDependencies", {}).keys())
+                    all_deps = set(deps + dev_deps)
+
+                    # Check for real Node.js dependencies
+                    real_deps = all_deps & self._NODE_FRAMEWORKS
+                    if real_deps:
+                        found_real_node = True
+                        analysis["dependencies"].extend(deps)
+                        analysis["frameworks"].extend([d for d in real_deps if d in deps])
+
+                        if root == self.project_path:
+                            analysis["scripts"] = data.get("scripts", {})
                 except (FileNotFoundError, PermissionError) as e:
                     logger.debug("Skip package.json: %s", e)
-        
+
+        if found_real_node:
+            analysis["language"] = "javascript/node"
+
         # Deduplicate
         analysis["dependencies"] = list(set(analysis["dependencies"]))
         analysis["frameworks"] = list(set(analysis["frameworks"]))
+
+    def _detect_static_html(self, analysis: dict):
+        """Detect static HTML projects (index.html without real JS frameworks)."""
+        if analysis["language"] != "unknown":
+            return  # Already detected as Node.js or Python, skip
+
+        for root, dirs, files in os.walk(self.project_path):
+            if "node_modules" in dirs:
+                dirs.remove("node_modules")
+
+            if "index.html" in files:
+                analysis["language"] = "html"
+                analysis["frameworks"] = []
+                return
 
     def _detect_python(self, analysis: dict):
         for root, dirs, files in os.walk(self.project_path):

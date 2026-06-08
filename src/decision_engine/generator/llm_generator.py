@@ -13,6 +13,19 @@ log = logging.getLogger(__name__)
 # keep prompt under ~5k chars to stay within timeout and leave room for output.
 _MAX_PROMPT_CHARS = int(os.environ.get("LOCAL_MAX_PROMPT_CHARS", "5000"))
 
+# Per-task-type prompt limits (chars). K8s templates are huge; cut aggressively.
+_TASK_LIMITS = {
+    "dockerfile": 8000,
+    "docker_compose": 8000,
+    "kubernetes": 4000,
+    "k8s": 4000,
+    "gitops_manifests": 4000,
+    "cicd": 8000,
+    "ci": 8000,
+    "github_actions": 8000,
+    "default": 5000,
+}
+
 
 def _artifact_type(task_type: str) -> str:
     t = task_type.lower()
@@ -83,15 +96,18 @@ class LLMGenerator:
             full_prompt += f"\n\nRAG BEST PRACTICES:\n{rag_snippet}"
 
         # 5. Hard cap — must come LAST after all appends
-        log.info("Prompt length for %s: %d chars", task_type, len(full_prompt))
-        if len(full_prompt) > _MAX_PROMPT_CHARS:
+        max_chars = _TASK_LIMITS.get(task_type, _TASK_LIMITS["default"])
+        max_chars = min(max_chars, _MAX_PROMPT_CHARS)
+        log.info("Prompt length for %s: %d chars (limit: %d)", task_type, len(full_prompt), max_chars)
+        if len(full_prompt) > max_chars:
             log.warning(
-                "Truncating prompt from %d → %d chars (llama.cpp ctx guard)",
+                "Truncating prompt from %d → %d chars (task=%s, llama.cpp ctx guard)",
                 len(full_prompt),
-                _MAX_PROMPT_CHARS,
+                max_chars,
+                task_type,
             )
             full_prompt = (
-                full_prompt[:_MAX_PROMPT_CHARS]
+                full_prompt[:max_chars]
                 + "\n...[TRUNCATED — FIT LOCAL CONTEXT]..."
             )
 
