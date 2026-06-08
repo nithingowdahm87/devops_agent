@@ -138,6 +138,11 @@ class LLMGenerator:
         return all_files
 
     def _parse_files(self, response: str) -> list[GeneratedFile]:
+        # Strip any leading reasoning text before the first FILENAME marker
+        idx = response.find("FILENAME:")
+        if idx > 0:
+            response = response[idx:]
+
         files = []
         pattern = r"(?:###\s*)?FILENAME:\s*([^\s\n]+).*\n(?:```[\w]*\n)?(.*?)(?:```|$)"
         for m in re.finditer(pattern, response, re.DOTALL | re.IGNORECASE):

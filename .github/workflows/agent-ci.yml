@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-name: DevOps Agent V12.0 Core CI
+name: DevOps Agent V2.0.0 Core CI
 
 on:
   push:

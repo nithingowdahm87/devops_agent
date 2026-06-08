@@ -621,7 +621,7 @@ def run_manual_menu(project_path, context, audit, publisher, run_id):
 # ================================================================
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="DevOps AI Agent Pipeline v12.0")
+    parser = argparse.ArgumentParser(description="DevOps AI Agent Pipeline v2.0.0")
     parser.add_argument("--env", type=str, default="dev", help="Environment (dev, staging, prod)")
     parser.add_argument("--strict", action="store_true", help="Enable strict policy mode")
     parser.add_argument("--no-llm", action="store_true", help="Force deterministic fallback mode")
@@ -629,13 +629,19 @@ def main():
     parser.add_argument("--gitops-repo", type=str, help="GitOps repository URL or path")
     parser.add_argument("--service", type=str, help="Target a specific microservice only")
     parser.add_argument("--no-prompts", action="store_true", help="Run fully non-interactive (skip extra customization questions)")
-    parser.add_argument("--llm-mode", type=str, choices=["remote_first", "ollama_first", "ollama_only"],
-                        default=os.environ.get("LLM_PROVIDER_MODE", "remote_first"),
-                        help="LLM provider mode: remote_first, ollama_first, or ollama_only")
+    parser.add_argument("--llm-mode", type=str, choices=["local", "kimchi", "remote"],
+                        default=os.environ.get("LLM_PROVIDER_MODE", "kimchi"),
+                        help="LLM provider mode: local (llama.cpp), kimchi (Kimchi CLI API), or remote (Groq/Gemini/etc.)")
     parser.add_argument("path", type=str, nargs="?", help="Project path")
     args = parser.parse_args()
 
-    # Set LLM provider mode from CLI
+    # Map --llm-mode to LLM_PRIMARY env var
+    mode_to_primary = {
+        "local":   "llamacpp",
+        "kimchi":  "kimchi",
+        "remote":  "groq",
+    }
+    os.environ["LLM_PRIMARY"] = mode_to_primary.get(args.llm_mode, args.llm_mode)
     os.environ["LLM_PROVIDER_MODE"] = args.llm_mode
 
     # Configure based on args
@@ -660,12 +666,13 @@ def main():
     audit = AuditLog(run_id=run_id)
     publisher = GitOpsPublisher()
     
-    print_header(f"DevOps AI Agent Pipeline v12.0 [run:{run_id}]")
+    print_header(f"DevOps AI Agent Pipeline v2.0.0 [run:{run_id}]")
     logger.info("Pipeline started | gitops_mode=%s", publisher.mode, extra={"stage": "init"})
     
     project_path = args.path or input("Enter project path: ").strip()
-    if not project_path or not os.path.exists(project_path):
-        print(f"❌ Path does not exist: {project_path}")
+    project_path = os.path.abspath(os.path.expanduser(project_path))
+    if not os.path.exists(project_path):
+        print(f"Path does not exist: {project_path}")
         return
 
     # STEP 1: ANALYSIS
@@ -682,7 +689,7 @@ def main():
             choice = '1'
         else:
             print("\n--- DevOps AI Agent (v12.0) ---")
-            print("1. 🧠  Start Automated DevOps Generation (Auto-Pilot / V2)")
+            print("1. 🧠  Start Automated DevOps Generation (Auto-Pilot / v2.0.0)")
             print("2. 🛠️   Run Specific Stages Manually (Legacy)")
             print("q. Exit")
             

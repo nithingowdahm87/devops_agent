@@ -77,7 +77,8 @@ class CodeAnalysisAgent:
                         analysis["frameworks"].append("express")
                     if "react" in deps:
                         analysis["frameworks"].append("react")
-                except Exception: pass
+                except (FileNotFoundError, PermissionError) as e:
+                    logger.debug("Skip package.json: %s", e)
         
         # Deduplicate
         analysis["dependencies"] = list(set(analysis["dependencies"]))
@@ -100,7 +101,8 @@ class CodeAnalysisAgent:
                     if "flask" in content_lower: analysis["frameworks"].append("flask")
                     if "django" in content_lower: analysis["frameworks"].append("django")
                     if "fastapi" in content_lower: analysis["frameworks"].append("fastapi")
-                except Exception: pass
+                except (FileNotFoundError, PermissionError, json.JSONDecodeError) as e:
+                    logger.debug("Skip requirements.txt: %s", e)
                 
         # Deduplicate
         analysis["dependencies"] = list(set(analysis["dependencies"]))
@@ -352,7 +354,8 @@ class CodeAnalysisAgent:
                         "key_deps": deps[:6], "role": _infer_role(svc_frameworks, deps, dev_deps, os.path.basename(root)),
                         "databases": svc_dbs,
                     }
-                except Exception:
+                except (FileNotFoundError, PermissionError, json.JSONDecodeError) as e:
+                    logger.debug("Skip Node.js service: %s", e)
                     microservice_details[rel_dir] = {
                         "path": rel_dir, "language": "Node.js", "frameworks": [], "ports": ["3000"],
                         "base_image": "node:20-alpine", "runtime_version": "20",
@@ -393,7 +396,8 @@ class CodeAnalysisAgent:
                         "role": _infer_role(svc_frameworks, deps, [], os.path.basename(root)),
                         "databases": svc_dbs,
                     }
-                except Exception:
+                except (FileNotFoundError, PermissionError, json.JSONDecodeError) as e:
+                    logger.debug("Skip Python service: %s", e)
                     microservice_details[rel_dir] = {
                         "path": rel_dir, "language": "Python", "frameworks": [], "ports": ["8000"],
                         "base_image": "python:3.11-slim", "runtime_version": "3.11",
@@ -440,7 +444,8 @@ class CodeAnalysisAgent:
                             "role": role,
                             "databases": svc_dbs,
                         }
-                    except Exception:
+                    except (FileNotFoundError, PermissionError) as e:
+                        logger.debug("Skip Java service: %s", e)
                         microservice_details[rel_dir] = {
                             "path": rel_dir, "language": "Java", "frameworks": ["Spring Boot"], "ports": ["8080"],
                             "base_image": "maven-openjdk", "runtime_version": "17",
@@ -520,7 +525,8 @@ class CodeAnalysisAgent:
             try:
                 content = read_file(self.cache_file)
                 return ProjectContext.model_validate_json(content)
-            except Exception:
+            except (FileNotFoundError, PermissionError, json.JSONDecodeError, ValueError) as e:
+                logger.debug("Cache invalid: %s", e)
                 print("⚠️  Cache invalid, re-analyzing...")
                 return self.analyze()
         return self.analyze()

@@ -27,5 +27,5 @@ else
 fi
 
 # Run the Agent
-# Updated to use the new v15.0 Sovereign Engine (agent.py)
+# Updated to use the new v2.0.0 Sovereign Engine (agent.py)
 python3 main.py "$@"

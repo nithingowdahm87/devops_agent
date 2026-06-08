@@ -23,6 +23,7 @@ from src.memory.long_term_memory import LongTermMemory
 from src.llm_clients.gemini_client import GeminiClient
 from src.llm_clients.nvidia_client import NvidiaClient
 from src.llm_clients.groq_client import GroqClient
+from src.llm_clients.kimchi_client import KimchiClient
 from src.llm_clients.mock_client import MockClient
 
 # Engine
@@ -55,14 +56,33 @@ class V2Orchestrator:
         self._init_generators()
         
     def _init_generators(self):
-        """Try to init real clients, fallback to mock."""
-        clients = [
-            ("Gemini", GeminiClient),
-            ("Groq", GroqClient),
-            ("NVIDIA", NvidiaClient)
-        ]
-        
-        for name, cls in clients:
+        """Try to init real clients, fallback to mock.
+
+        Respects LLM_PRIMARY env var — only initializes the primary provider
+        (plus mocks as silent fallbacks) to avoid redundant API calls.
+        """
+        all_clients = {
+            "gemini":  ("Gemini", GeminiClient),
+            "groq":    ("Groq", GroqClient),
+            "nvidia":  ("NVIDIA", NvidiaClient),
+            "kimchi":  ("Kimchi", KimchiClient),
+            "cerebras":("Cerebras", None),  # imported on demand if needed
+            "openrouter":("OpenRouter", None),
+        }
+        primary = os.environ.get("LLM_PRIMARY", "").lower()
+        if primary not in all_clients:
+            primary = "groq"
+
+        # Always init primary; only init others if explicitly configured for multi-provider
+        order = [all_clients[primary]]
+        if os.environ.get("LLM_MULTI_PROVIDER", "").lower() == "true":
+            for k, v in all_clients.items():
+                if k != primary and v[1] is not None:
+                    order.append(v)
+
+        for name, cls in order:
+            if cls is None:
+                continue
             try:
                 client = cls()
                 self.generators.append(LLMGenerator(client, name))
@@ -411,6 +431,9 @@ class V2Orchestrator:
                     file_content: str
                     model_name: str = "Fallback-Template"
                     reasoning: str = "Hardware-locked deterministic fallback"
+                    security_score: int = 50
+                    compliance_score: int = 50
+                    best_practice_score: int = 60
                 candidates.append(MockCandidate(file_content=content))
         else:
             # Sequential execution — Ollama processes requests one at a time;
@@ -836,7 +859,7 @@ class V2Orchestrator:
             # Minimal README/Structure
             readme_content = (
                 "# GitOps Repository\n"
-                "Managed by UrbanOps Agent v12.0\n\n"
+                "Managed by UrbanOps Agent v2.0.0\n\n"
                 "## Directory Layout\n"
                 "- `argocd/applicationset.yaml`: The master App-of-Apps generator mapping to `apps/*`.\n"
                 "- `namespaces/`: Contains the isolated `<svc_name>.yaml` Namespace declarations.\n"

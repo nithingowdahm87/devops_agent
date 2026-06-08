@@ -1,10 +1,10 @@
-# DevOps Agent v12.2 (GitOps Ready)
+# DevOps Agent v2.0.0 (GitOps Ready)
 
 Production-grade AI agent that compiles Dockerfiles, Kubernetes manifests, and CI/CD pipelines from raw codebases. Deterministic compiler architecture with a local Ollama LLM and a production GitOps generator.
 
 ---
 
-## Architecture (v12.2 Overhaul)
+## Architecture (v2.0.0 Overhaul)
 
 Codebase Input
 │

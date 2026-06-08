@@ -8,8 +8,9 @@ from src.engine.llm import call_llm
 
 log = logging.getLogger(__name__)
 
-# Hard cap: ~750 tokens leaving room for output + system prompt
-_MAX_PROMPT_CHARS = int(os.environ.get("LOCAL_MAX_PROMPT_CHARS", "2500"))
+# Hard cap: ~2000 tokens leaving room for output + system prompt
+# Kimchi (kimi-k2.6) handles 256k context; keep prompt under ~8k chars for speed
+_MAX_PROMPT_CHARS = int(os.environ.get("LOCAL_MAX_PROMPT_CHARS", "8000"))
 
 
 def _artifact_type(task_type: str) -> str:
@@ -32,7 +33,7 @@ def _fetch_rag_snippet(task_type: str, context: Dict[str, Any]) -> str:
     try:
         from src.engine.rag import get_rag_context, RAGStore
         store = RAGStore()
-        if store.collection.count() == 0:
+        if not store.collection or store.collection.count() == 0:
             return ""   # nothing seeded yet, skip silently
 
         artifact_type = _artifact_type(task_type)
@@ -117,18 +118,59 @@ class LLMGenerator:
     def _clean_markdown(self, info: str) -> str:
         if isinstance(info, list):
             info = "\n".join([str(i) for i in info])
-        if "FILENAME:" in info:
-            return info.strip()
-        if "```" in info:
-            import re
-            match = re.search(r"```(?:\w+)?\n(.*?)```", info, re.DOTALL)
-            if match:
-                return match.group(1).strip()
-            return (
-                info.replace("```yaml", "")
-                    .replace("```dockerfile", "")
-                    .replace("```json", "")
-                    .replace("```", "")
-                    .strip()
-            )
-        return info.strip()
+        info = str(info).strip()
+
+        # 0. Aggressive preamble strip — reasoning models often emit meta-text before
+        #    the actual file content. Scan line-by-line and find the first "real" line.
+        REASONING_HINTS = (
+            "the user is", "the user wants", "i need to", "i will", "i should",
+            "looking at", "fixing", "broken file", "validation error",
+            "i cannot", "i can't", "no actual file", "content was not",
+            "paste your", "package.json", "i don't see", "i do not see",
+            "here is", "there is no", "not provided", "not valid",
+            "senior devops", "senior patch", "fix the provided",
+            "catch-22", "this is a", "actually, looking",
+        )
+        DIRECTIVE_HINTS = (
+            "from ", "# syntax=", "# stage", "arg ",
+            "apiversion:", "kind:", "metadata:",
+            "name:", "on:", "jobs:", "permissions:",
+            "version:", "services:", "networks:",
+            "---", "```", "filename:",
+        )
+        lines = info.splitlines()
+        start_idx = 0
+        for i, line in enumerate(lines):
+            stripped = line.strip().lower()
+            # If we hit a reasoning phrase, skip past it
+            if any(h in stripped for h in REASONING_HINTS):
+                start_idx = i + 1
+                continue
+            # If we hit a directive, everything from here is likely real content
+            if any(stripped.startswith(h) for h in DIRECTIVE_HINTS):
+                start_idx = i
+                break
+        if start_idx > 0:
+            info = "\n".join(lines[start_idx:]).strip()
+
+        # 1. If the response contains FILENAME markers, trust the orchestrator's
+        #    multifile parser and return the raw text from the first FILENAME.
+        idx = info.find("FILENAME:")
+        if idx != -1:
+            return info[idx:]
+
+        # 2. Extract all ``` blocks and return the largest one (most likely the actual code)
+        import re
+        blocks = re.findall(r"```(?:[\w+-]+)?\n(.*?)\n*```", info, re.DOTALL)
+        if blocks:
+            # Return the longest code block; reasoning text is usually shorter
+            best = max(blocks, key=len)
+            return best.strip()
+
+        # 3. Fallback: if no code blocks, try to find a line starting with a known directive
+        for line in info.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("FROM ", "apiVersion:", "name:", "on:", "jobs:")):
+                return info[info.find(stripped):]
+
+        return info

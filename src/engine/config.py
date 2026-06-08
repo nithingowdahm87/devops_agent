@@ -28,7 +28,8 @@ GROQ_API_KEY       = _e("GROQ_API_KEY")
 NVIDIA_API_KEY     = _e("NVIDIA_API_KEY")
 CEREBRAS_API_KEY   = _e("CEREBRAS_API_KEY")
 OPENROUTER_API_KEY = _e("OPENROUTER_API_KEY")
-HUGGINGFACE_TOKEN  = _e("HUGGINGFACE_TOKEN")
+# HUGGINGFACE_TOKEN  = _e("HUGGINGFACE_TOKEN")  # HuggingFace client not used
+KIMCHI_API_KEY     = _e("KIMCHI_API_KEY")
 
 # ── LLM Routing ───────────────────────────────────────────────────────────────
 LLM_STRATEGY       = _e("LLM_STRATEGY",       "fallback")
@@ -46,7 +47,8 @@ GEMINI_MODEL       = _e("GEMINI_MODEL",       "gemini-2.0-flash-exp")
 NVIDIA_MODEL       = _e("NVIDIA_MODEL",       "meta/llama-3.1-70b-instruct")
 CEREBRAS_MODEL     = _e("CEREBRAS_MODEL",     "llama3.1-70b")
 OPENROUTER_MODEL   = _e("OPENROUTER_MODEL",   "anthropic/claude-3.5-sonnet")
-HUGGINGFACE_MODEL  = _e("HUGGINGFACE_MODEL",  "mistralai/Mistral-7B-Instruct-v0.3")
+# HUGGINGFACE_MODEL  = _e("HUGGINGFACE_MODEL",  "mistralai/Mistral-7B-Instruct-v0.3")  # HuggingFace client not used
+KIMCHI_MODEL       = _e("KIMCHI_MODEL",       "kimi-k2.6")
 
 # ── Pipeline mode ─────────────────────────────────────────────────────────────
 PIPELINE_ENV       = _e("PIPELINE_ENV", "prod")
