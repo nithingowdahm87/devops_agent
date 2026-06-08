@@ -34,3 +34,7 @@ trivy-*.sarif
 .chroma_db/
 .env.b64
 .env.b64
+audit_logs/
+.env.b64
+outputs/
+.artifacts_history/
