@@ -12,13 +12,13 @@ FROM python:${PYTHON_VERSION}-slim AS builder
 
 WORKDIR /build
 
-# Install build deps
+# Install build deps (chroma-hnswlib needs C++ build tools)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc git \
+    && apt-get install -y --no-install-recommends gcc g++ build-essential git \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip and install build tools
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel uv
+RUN pip install --no-cache-dir uv
 
 # Copy source + config
 COPY pyproject.toml requirements.txt ./
@@ -26,13 +26,19 @@ COPY src/ ./src/
 COPY configs/ ./configs/
 COPY main.py run_agent.sh ./
 
-# Create venv and install deps
-RUN uv venv /opt/venv \
-    && VIRTUAL_ENV=/opt/venv uv pip install -r requirements.txt \
-    && VIRTUAL_ENV=/opt/venv uv pip install -e . 2>/dev/null || true
+# Create venv and install deps with pip (needed for chroma-hnswlib compilation)
+RUN uv venv /opt/venv
+ENV VIRTUAL_ENV=/opt/venv PATH="/opt/venv/bin:$PATH"
+RUN uv pip install --python=/opt/venv/bin/python -r requirements.txt \
+    && uv pip install --python=/opt/venv/bin/python -e .
 
 # ── Stage 2: Runtime ─────────────────────────────────────────
 FROM python:${PYTHON_VERSION}-slim AS runtime
+
+# chroma-hnswlib needs libstdc++ at runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
 
 ARG GIT_SHA
 ARG APP_VERSION
