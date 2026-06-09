@@ -38,3 +38,7 @@ audit_logs/
 .env.b64
 outputs/
 .artifacts_history/
+
+# Logs
+logs/
+*.log
