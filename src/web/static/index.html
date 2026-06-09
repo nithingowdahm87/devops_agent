@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DevOps Agent Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- Header -->
+  <header id="header" class="header hidden">
+    <div class="header-brand">DevOps Agent</div>
+    <div class="header-user">
+      <span id="header-email"></span>
+      <button id="logout-btn" class="btn btn-sm">Logout</button>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- Login / Register -->
+    <section id="auth-section">
+      <div class="auth-card">
+        <h1>Sign In</h1>
+        <div id="login-error" class="error hidden"></div>
+        <form id="login-form">
+          <div class="form-group">
+            <label for="login-email">Email / Username</label>
+            <input type="text" id="login-email" name="username" required autocomplete="username" />
+          </div>
+          <div class="form-group">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" name="password" required autocomplete="current-password" />
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Sign In</button>
+        </form>
+        <div class="auth-switch">
+          Don't have an account?
+          <button type="button" id="show-register-btn" class="link-btn">Register</button>
+        </div>
+      </div>
+
+      <div class="auth-card hidden" id="register-card">
+        <h1>Register</h1>
+        <div id="register-error" class="error hidden"></div>
+        <form id="register-form">
+          <div class="form-group">
+            <label for="register-email">Email</label>
+            <input type="email" id="register-email" name="email" required />
+          </div>
+          <div class="form-group">
+            <label for="register-password">Password</label>
+            <input type="password" id="register-password" name="password" required />
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Create Account</button>
+        </form>
+        <div class="auth-switch">
+          Already have an account?
+          <button type="button" id="show-login-btn" class="link-btn">Sign In</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Dashboard (hidden until logged in) -->
+    <section id="dashboard-section" class="hidden">
+
+      <!-- Projects -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Projects</h2>
+          <button id="show-create-project-btn" class="btn btn-sm">+ New Project</button>
+        </div>
+
+        <div id="create-project-form" class="inline-form hidden">
+          <div class="form-row">
+            <input type="text" id="project-name" placeholder="Project Name" required />
+            <input type="text" id="project-repo" placeholder="Repository URL (e.g. owner/repo)" />
+            <button id="create-project-btn" class="btn btn-primary">Create</button>
+            <button id="cancel-create-project-btn" class="btn btn-sm">Cancel</button>
+          </div>
+          <div id="create-project-error" class="error hidden"></div>
+        </div>
+
+        <div id="projects-loading" class="loading hidden">Loading projects...</div>
+        <div id="projects-empty" class="empty-state hidden">No projects found.</div>
+        <table id="projects-table" class="table hidden">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Repository</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="projects-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- Runs -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Runs</h2>
+          <button id="refresh-runs-btn" class="btn btn-sm">Refresh</button>
+        </div>
+        <div id="runs-loading" class="loading hidden">Loading runs...</div>
+        <div id="runs-empty" class="empty-state hidden">No runs found.</div>
+        <table id="runs-table" class="table hidden">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Project</th>
+              <th>Status</th>
+              <th>Stage</th>
+              <th>Started</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="runs-tbody"></tbody>
+        </table>
+        <div id="run-detail" class="run-detail hidden"></div>
+      </div>
+
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
