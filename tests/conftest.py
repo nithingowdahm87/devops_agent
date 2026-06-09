@@ -4,6 +4,48 @@ import os
 import json
 import tempfile
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from src.api.main import app
+from src.db.database import Base, get_db
+
+# Ensure all models are registered with Base.metadata before create_all
+from src.db import models  # noqa: F401
+
+
+# FastAPI test DB setup (shared across all API test modules)
+_SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
+_engine = create_engine(_SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+_TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
+
+
+def _override_get_db():
+    db = _TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+app.dependency_overrides[get_db] = _override_get_db
+
+# Monkeypatch production SessionLocal so background tasks use test DB too
+from src.db import database as _db_module
+_db_module.SessionLocal = _TestingSessionLocal
+
+
+@pytest.fixture(autouse=True)
+def _setup_db():
+    Base.metadata.create_all(bind=_engine)
+    yield
+    Base.metadata.drop_all(bind=_engine)
+
+
+@pytest.fixture
+def client():
+    from fastapi.testclient import TestClient
+    return TestClient(app)
 
 
 @pytest.fixture

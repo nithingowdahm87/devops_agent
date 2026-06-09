@@ -1,5 +1,5 @@
 """Pydantic Settings for SaaS mode."""
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
 
@@ -20,9 +20,7 @@ class Settings(BaseSettings):
     KIMCHI_API_KEY: str | None = Field(default=None)
     KIMCHI_API_URL: str = Field(default="https://llm.kimchi.dev/openai/v1")
 
-    class Config:
-        env_file = ".env"
-        extra = "allow"
+    model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
 
 settings = Settings()

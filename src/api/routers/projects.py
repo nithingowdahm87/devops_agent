@@ -1,7 +1,8 @@
 """Project management endpoints."""
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List
 
 from src.db.database import get_db
@@ -20,10 +21,9 @@ class ProjectResponse(BaseModel):
     name: str
     description: str | None
     repo_url: str | None
-    created_at: str | None
+    created_at: datetime | None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 @router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 def create_project(

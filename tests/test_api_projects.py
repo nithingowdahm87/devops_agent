@@ -1,6 +1,5 @@
 """Project API tests."""
-from fastapi.testclient import TestClient
-from tests.test_api_auth import client, _setup_db
+from tests.test_api_auth import client
 
 
 def _get_token():
