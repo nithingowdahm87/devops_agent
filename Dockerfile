@@ -80,4 +80,4 @@ USER appuser
 
 # The agent requires a project path as argument
 ENTRYPOINT ["python3", "main.py"]
-CMD ["--help"]
+CMD ["python3", "main.py", "--mode", "server", "--port", "8000"]

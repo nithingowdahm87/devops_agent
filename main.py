@@ -617,25 +617,10 @@ def run_manual_menu(project_path, context, audit, publisher, run_id):
             print(f"🎉 Stage {result.stage_name} completed successfully.")
 
 # ================================================================
-# MAIN WIZARD
+# MAIN WIZARD (CLI MODE)
 # ================================================================
-def main():
-    import argparse
-    parser = argparse.ArgumentParser(description="DevOps AI Agent Pipeline v2.0.0")
-    parser.add_argument("--env", type=str, default="dev", help="Environment (dev, staging, prod)")
-    parser.add_argument("--strict", action="store_true", help="Enable strict policy mode")
-    parser.add_argument("--no-llm", action="store_true", help="Force deterministic fallback mode")
-    parser.add_argument("--gitops", action="store_true", help="Enable GitOps mode (per-service CI & manifests)")
-    parser.add_argument("--gitops-repo", type=str, help="GitOps repository URL or path")
-    parser.add_argument("--service", type=str, help="Target a specific microservice only")
-    parser.add_argument("--no-prompts", action="store_true", help="Run fully non-interactive (skip extra customization questions)")
-    parser.add_argument("--no-heal", action="store_true", help="Skip automated healing/validation retries (faster but less polished)")
-    parser.add_argument("--llm-mode", type=str, choices=["local", "kimchi", "remote"],
-                        default=os.environ.get("LLM_PROVIDER_MODE", "kimchi"),
-                        help="LLM provider mode: local (llama.cpp), kimchi (Kimchi CLI API), or remote (Groq/Gemini/etc.)")
-    parser.add_argument("path", type=str, nargs="?", help="Project path")
-    args = parser.parse_args()
-
+def run_cli(args):
+    """Execute the CLI pipeline (existing behavior)."""
     # Map --llm-mode to LLM_PRIMARY env var
     mode_to_primary = {
         "local":   "llamacpp",
@@ -730,6 +715,57 @@ def main():
         if os.path.exists(fpath):
             try: os.remove(fpath)
             except Exception: pass
+
+
+# ================================================================
+# SERVER MODE
+# ================================================================
+def run_server(args):
+    """Start the FastAPI server."""
+    import uvicorn
+    from src.api.main import app
+    from src.config.settings import settings
+    uvicorn.run(
+        "src.api.main:app",
+        host=settings.SERVER_HOST,
+        port=args.port or settings.SERVER_PORT,
+        reload=settings.ENVIRONMENT == "development",
+    )
+
+
+# ================================================================
+# ENTRY POINT
+# ================================================================
+def main():
+    """Dual-mode entry point: CLI or Server."""
+    import argparse
+    parser = argparse.ArgumentParser(description="DevOps AI Agent Pipeline v3.0.0")
+    parser.add_argument("--mode", choices=["cli", "server"], default="cli",
+                        help="Run mode: 'cli' for interactive pipeline, 'server' for FastAPI backend")
+
+    # Preserve ALL existing CLI args
+    parser.add_argument("--env", type=str, default="dev", help="Environment (dev, staging, prod)")
+    parser.add_argument("--strict", action="store_true", help="Enable strict policy mode")
+    parser.add_argument("--no-llm", action="store_true", help="Force deterministic fallback mode")
+    parser.add_argument("--gitops", action="store_true", help="Enable GitOps mode (per-service CI & manifests)")
+    parser.add_argument("--gitops-repo", type=str, help="GitOps repository URL or path")
+    parser.add_argument("--service", type=str, help="Target a specific microservice only")
+    parser.add_argument("--no-prompts", action="store_true", help="Run fully non-interactive (skip extra customization questions)")
+    parser.add_argument("--no-heal", action="store_true", help="Skip automated healing/validation retries (faster but less polished)")
+    parser.add_argument("--llm-mode", type=str, choices=["local", "kimchi", "remote"],
+                        default=os.environ.get("LLM_PROVIDER_MODE", "kimchi"),
+                        help="LLM provider mode: local (llama.cpp), kimchi (Kimchi CLI API), or remote (Groq/Gemini/etc.)")
+    parser.add_argument("path", type=str, nargs="?", help="Project path")
+
+    # Server args
+    parser.add_argument("--port", type=int, help="Server port (server mode only)")
+
+    args = parser.parse_args()
+
+    if args.mode == "server":
+        run_server(args)
+    else:
+        run_cli(args)
 
 
 if __name__ == "__main__":
