@@ -1,0 +1,9 @@
+# Example agent configuration for CLI deployment
+# Copy this file and customize for your agent
+
+name: "build-agent-01"
+capabilities:
+  - "docker-build"
+  - "kubectl-deploy"
+  - "terraform-apply"
+api_base_url: "http://localhost:8000"

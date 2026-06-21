@@ -79,12 +79,18 @@ def get_run(
     run = crud.get_run(db, run_id, current_user.id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
+    results = None
+    if run.results:
+        try:
+            results = json.loads(run.results)
+        except json.JSONDecodeError:
+            results = None
     return {
         "id": run.id,
         "project_id": run.project_id,
         "status": run.status,
         "stage": run.stage,
-        "results": json.loads(run.results) if run.results else None,
+        "results": results,
         "logs": run.logs,
         "created_at": run.created_at.isoformat() if run.created_at else None,
     }

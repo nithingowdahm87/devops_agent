@@ -1,234 +1,275 @@
-# DevOps Agent v2.0.0 (GitOps Ready)
+# 🚀 DevOps Agent — Multi-Agent DevOps Automation Platform
 
-Production-grade AI agent that compiles Dockerfiles, Kubernetes manifests, and CI/CD pipelines from raw codebases. Deterministic compiler architecture with multi-provider LLM routing and a production GitOps generator.
+![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
+![FastAPI](https://img.shields.io/badge/fastapi-0.100+-green.svg)
+![SQLAlchemy](https://img.shields.io/badge/sqlalchemy-2.0+-orange.svg)
+![Tests Passing](https://img.shields.io/badge/tests-22%20passing-brightgreen.svg)
+![License MIT](https://img.shields.io/badge/license-MIT-yellow.svg)
 
----
+## 🏗️ Architecture
 
-## Architecture (v2.0.0 Overhaul)
+![Architecture Diagram](docs/architecture.png)
 
-Codebase Input
-│
-▼
+```mermaid
+graph TD
+    A[Clients<br/>Web UI / CLI / HTTP] -->|REST API| B(FastAPI Server)
+    B --> C[Auth Router]
+    B --> D[Projects Router]
+    B --> E[Runs Router]
+    B --> F[Video Router]
+    B --> G[Agents Router]
+    B --> H[Evaluation Router]
+    B --> I[Admin Router]
+    C --> J[(SQLite / PostgreSQL)]
+    D --> J
+    E --> J
+    F --> J
+    G --> J
+    H --> J
+    I --> J
+    E --> K[Pipeline Background Tasks]
+    F --> L[Video Generation API]
+    G --> M[CLI Agent Workers]
+    H --> N[Cohen's Kappa Engine]
+```
+
+```
 ┌─────────────────────────────────────────────────────────────┐
-│ Stage 1 — Code Discovery & Per-Service Isolation          │
-│ Detects microservices, runtime versions, port assignments  │
-└────────────────────────┬────────────────────────────────────┘
-│
-▼
+│                     Clients                                 │
+│              Web UI / CLI / HTTP API                        │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ REST API
+                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Stage 2 — LLM Router (Multi-Provider)                      │
-│ Kimchi CLI API / Local Ollama / Remote APIs (fallback chain)│
-└────────────────────────┬────────────────────────────────────┘
-│
-▼
+│              FastAPI Application                            │
+│  Auth ── Projects ── Runs ── Video ── Agents ── Eval ── Admin│
+└─────────────────────────┬───────────────────────────────────┘
+                          │ SQLAlchemy ORM
+                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Stage 3 — GitOps Pipeline Generation                       │
-│ GitHub Actions (per-svc) / ArgoCD Manifests / Secrets Doc  │
-└────────────────────────┬────────────────────────────────────┘
-│
-▼
-┌─────────────────────────────────────────────────────────────┐
-│ Stage 4 — OODA Healing & Schema Validation                 │
-│ hadolint / kubeconform / JSON Schema → Healer → Validate   │
-└────────────────────────┬────────────────────────────────────┘
-│
-▼
-┌─────────────────────────────────────────────────────────────┐
-│ Stage 5 — Artifact Hierarchy (Outputs)                     │
-│ outputs/per-service/ | outputs/shared/ | outputs/docs/     │
+│            SQLite / PostgreSQL Database                     │
 └─────────────────────────────────────────────────────────────┘
+```
 
----
+## ✨ Features
 
-## LLM Provider Modes
+- 🔐 JWT Authentication & User Management
+- 📁 Project Management with GitHub Integration
+- 🏃 Pipeline Runs with Background Task Processing
+- 🎥 Async Video Generation Pipeline
+- 🤖 Multi-Agent Registry with Heartbeats
+- 📊 Cohen's Kappa Evaluation Framework
+- 🛡️ Admin Health & Stats Monitoring
+- 🧪 Full Test Coverage (22 tests + HTTP smoke tests)
+- 🛡️ Security Headers, Rate Limiting & Max Body Size Protection
+- 🔑 API Key Authentication (service-to-service auth)
+- 🗄️ Alembic Database Migrations (safe schema evolution)
+- 🔄 Soft Deletes & Audit Logging (recoverable data changes)
+- ⚡ Circuit Breakers & Request Timeouts (reliability)
+- 📈 Prometheus Metrics Export (`/metrics` endpoint)
+- 🔬 Deep Health Checks (`/ready`, `/health/deep` with DB + Redis + external API diagnostics)
 
-The agent supports three LLM modes via `--llm-mode`. Use the mode that best fits your infrastructure and security requirements.
-
-| Mode | Provider | Setup | Speed |
-|------|----------|-------|-------|
-| `kimchi` (default) | Kimchi CLI API | Auto-reads `~/.config/kimchi/harness/auth.json` | ~10-60s |
-| `local` | llama.cpp / Ollama | Requires local model server | ~30-120s |
-| `remote` | Groq / Gemini / Cerebras / NVIDIA / OpenRouter | Requires API keys in `.env` | ~5-30s |
-
-### Kimchi CLI API (Recommended)
-
-The default mode uses the Kimchi CLI API, which auto-detects your existing authentication token from `~/.config/kimchi/harness/auth.json`. No manual API key management required.
-
-**Supported models:**
-- `kimi-k2.5`
-- `kimi-k2.6`
-- `minimax-m2.5`
-- `minimax-m2.7`
-- `nemotron-3-super-fp4`
-
-### Local Mode
-
-Uses a local llama.cpp server or Ollama at `http://localhost:8080/v1`. Fully offline once the model is downloaded.
-
-**Recommended models for 8 GB RAM:**
-
-For an 8 GB RAM laptop (WSL + Docker), use lightweight Llama 3.2 models:
+## 📡 API Quick Start
 
 ```bash
-# Install Ollama (Linux/Mac)
-/bin/bash -c "$(curl -fsSL https://ollama.com/install.sh)"
+# 1. Start server
+python main.py --mode server --port 8000
 
-# Pull a lightweight model (recommended for 8 GB RAM)
-ollama pull llama3.2:3b
-# or, for very low RAM:
-# ollama pull llama3.2:1b
+# 2. Register
+curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"alice@test.com","password":"secret123"}'
+
+# 3. Login
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -d "username=alice@test.com&password=secret123"
+
+# 4. Create project
+curl -X POST http://localhost:8000/api/v1/projects/ \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"demo","repo_url":"https://github.com/demo/app"}'
+
+# 5. Start run
+curl -X POST http://localhost:8000/api/v1/runs/ \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"project_id":1,"config":{},"no_heal":true}'
+
+# 6. Video job
+curl -X POST http://localhost:8000/api/v1/video/jobs \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Generate demo","project_id":1}'
+
+# 7. Register agent
+curl -X POST http://localhost:8000/api/v1/agents/ \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"agent-1","capabilities":"[\"docker\"]"}'
+
+# 8. Heartbeat
+curl -X POST http://localhost:8000/api/v1/agents/1/heartbeat \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"busy"}'
+
+# 9. Evaluation
+curl -X POST http://localhost:8000/api/v1/evaluation/ \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"predictions":[1,0,1,1,0],"ground_truth":[1,0,1,0,0],"project_id":1}'
+
+# 10. Health
+curl http://localhost:8000/api/v1/admin/health
 ```
 
-The model name must match the `OLLAMA_MODEL` value in your `.env` file.
+### API Key Authentication
 
-### Remote Mode
-
-Uses external API providers. Set API keys in your `.env` file:
-
-- `GROQ_API_KEY`
-- `GOOGLE_API_KEY`
-- `CEREBRAS_API_KEY`
-- `NVIDIA_API_KEY`
-- `OPENROUTER_API_KEY`
-
-Remote mode automatically falls back through the provider chain if one is unavailable.
-
----
-
-## Quick Start
-
-### Prerequisites
-- Python 3.10+
-- Local linters: `hadolint`, `kubeconform`, `shellcheck`
-
-### Install
 ```bash
-git clone https://github.com/nithingowdahm87/devops_agent
-cd devops_agent
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
+# Generate API key (shown once)
+curl -X POST http://localhost:8000/api/v1/auth/api-keys/ \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"ci-key"}'
+
+# Use API key directly — no JWT needed
+curl http://localhost:8000/api/v1/projects/ \
+  -H "X-API-Key: da_ifhZ5T84ap22gBnF_qke7Mb5IlZwNzMC-PKlbbBmczE"
 ```
 
-### Configure
+### Production Monitoring
+
 ```bash
-# 1. Copy and edit the environment template
-cp .env.example .env
-# Edit .env and set your API keys or LLM mode preferences
+# Prometheus metrics
+curl http://localhost:8000/metrics
 
-# 2. Initialize the local RAG Database (seeds prompts into ChromaDB)
-python3 -m scripts.seed_rag_from_prompts
+# Readiness check
+curl http://localhost:8000/api/v1/admin/ready
+
+# Deep health with latencies
+curl http://localhost:8000/api/v1/admin/health/deep
 ```
 
-### Run
+## 🗂️ Project Structure
+
+```
+src/
+├── api/
+│   ├── main.py
+│   ├── dependencies.py
+│   ├── middleware.py
+│   ├── rate_limit.py           # NEW
+│   ├── security_middleware.py  # NEW
+│   ├── metrics_middleware.py   # NEW
+│   ├── audit_middleware.py     # NEW
+│   └── routers/
+│       ├── auth.py
+│       ├── projects.py
+│       ├── runs.py
+│       ├── video.py
+│       ├── agents.py
+│       ├── evaluation.py
+│       ├── admin.py
+│       ├── apikeys.py          # NEW
+│       └── metrics.py          # NEW
+├── db/
+│   ├── database.py
+│   ├── models.py
+│   ├── models_apikey.py        # NEW
+│   ├── models_audit.py         # NEW
+│   ├── soft_delete.py          # NEW
+│   ├── crud.py
+│   ├── crud_apikey.py          # NEW
+│   ├── crud_audit.py           # NEW
+│   ├── models_video.py
+│   ├── models_agent.py
+│   ├── models_evaluation.py
+│   ├── crud_video.py
+│   ├── crud_agent.py
+│   └── crud_evaluation.py
+├── schemas.py
+├── schemas_apikey.py           # NEW
+├── schemas_video.py
+├── schemas_agent.py
+├── schemas_evaluation.py
+├── evaluation/
+│   └── kappa.py
+├── integrations/
+│   └── video_client.py
+├── observability/
+│   ├── logging.py
+│   ├── metrics.py              # NEW
+│   └── health.py               # NEW
+├── utils/
+│   ├── circuit_breaker.py      # NEW
+│   └── timeouts.py             # NEW
+└── config/
+    └── settings.py
+alembic/                        # NEW
+docs/
+├── architecture.md
+├── architecture.png            # NEW
+├── user-guide.md
+└── api-reference.md
+cli/
+├── main.py
+├── deploy.py
+└── example-agent.yaml
+sample-node-app/
+├── server.js            # Express API (demo target app)
+├── Dockerfile           # Multi-stage production image
+├── docker-compose.yml   # API + MongoDB stack
+├── k8s/                 # Full Kubernetes manifests
+└── .github/workflows/   # CI/CD pipeline
+scripts/
+├── http_client_tests.py
+└── gen_architecture.py         # NEW
+tests/
+├── test_api_auth.py
+├── test_api_projects.py
+├── test_api_runs.py
+├── test_api_video.py
+├── test_api_agents.py
+└── test_api_evaluation.py
+```
+
+## 🧪 Testing
+
 ```bash
-# Using Kimchi CLI API (default — no key needed if logged in)
-./run_agent.sh --llm-mode kimchi /path/to/project
+# Unit tests
+pytest tests/test_api_*.py -v
 
-# Using local Ollama/llama.cpp
-./run_agent.sh --llm-mode local /path/to/project
-
-# Using remote APIs (requires keys in .env)
-./run_agent.sh --llm-mode remote /path/to/project
-
-# Production mode (strict policy enforcement)
-./run_agent.sh --llm-mode kimchi --env prod /path/to/project
-
-# Dev mode (relaxed policies)
-./run_agent.sh --llm-mode kimchi /path/to/project
-
-# Non-interactive (no extra customization questions)
-./run_agent.sh --llm-mode kimchi --no-prompts /path/to/project
-
-# Zero-LLM deterministic template mode
-./run_agent.sh --no-llm /path/to/project
-
-# GitOps Mode (Automated Repo Setup + PRs)
-./run_agent.sh --llm-mode kimchi --gitops --gitops-repo https://github.com/org/gitops-infra /path/to/project
-
-# Targeted Single-Service Run
-./run_agent.sh --llm-mode kimchi --service auth-service --gitops /path/to/project
+# HTTP smoke tests (requires running server)
+python main.py --mode server --port 8000 &
+python scripts/http_client_tests.py
 ```
 
-## GitOps Mode
+## 🔒 Security & Production
 
-When `--gitops` is enabled, the agent orchestrates a full GitOps transformation:
+- **Rate Limiting**: Default 100 req/min reads, 20 req/min writes (configurable)
+- **Security Headers**: X-Content-Type-Options, X-Frame-Options, HSTS, X-XSS-Protection, Referrer-Policy
+- **Max Body Size**: Requests >10MB rejected with 413
+- **API Key Auth**: SHA-256 hashed keys with scoped access and expiration
+- **Soft Deletes**: Records marked with `deleted_at` instead of permanent removal
+- **Audit Logging**: Every CREATE/UPDATE/DELETE captured in `audit_logs` table
+- **Circuit Breakers**: External API calls (video, GitHub) fail fast after 5 consecutive errors
 
-1. **Per-Service CI**: Generates `.github/workflows/{{svc}}-ci.yml` with scoped path triggers.
-2. **ArgoCD Support**: Generates `ApplicationSet` and namespaced Kubernetes files.
-3. **Multi-Repo Sync**: Clones/Pulls the `--gitops-repo` and automatically creates PRs or commits if `GITHUB_TOKEN` is present.
-4. **Isolated Context**: Each service receives its own resource profile (CPU/RAM) and metadata.
+## 🐳 Docker
 
-### Required Secrets for GitOps automation
-
-To fully utilize the v2.0.0 proactive PR integration and CI workflows, ensure these environment variables are set during generation, or added to your actual target repository:
-
-- `GITHUB_TOKEN`: For the agent to automatically push to the GitOps repo and open a PR.
-- `GITHUB_REPO`: The target repo for the GitOps state (e.g. `your-username/my-infra-repo`).
-- `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`: Required by the generated CI actions to publish your built images.
-
-## Directory Hierarchy
-
-Generated files are organized in `outputs/` to support monorepos cleanly:
-
-```text
-outputs/
-├── per-service/          # Dockerfiles, CI workflows, and K8s manifests
-│   └── <service-name>/
-├── shared/               # docker-compose.yml and baseline K8s
-│   └── gitops/           # ArgoCD & ApplicationSet manifests
-└── docs/                 # Secrets requirements and audit reports
+```bash
+# Start with PostgreSQL + Redis
+ docker compose up -d
 ```
 
-## Prompt Standards
+App runs on port 8000, PostgreSQL on 5432, Redis on 6379.
 
-All prompts follow a 4-step structure used by production DevSecOps teams:
+## 📚 Documentation
 
-1. **Analyze** — inspect project files before writing a single line
-2. **Rules** — numbered, named, never-skip rules with exact code examples
-3. **Self-audit** — checkbox list the agent runs on its own output
-4. **Output format** — exact filenames and file paths the agent must produce
+- [Architecture](docs/architecture.md)
+- [User Guide](docs/user-guide.md)
+- [API Reference](docs/api-reference.md)
 
-Prompts are stored in `configs/prompts/` and are loaded by the RAG engine at runtime.
+## 📄 License
 
-| Prompt File | Covers | Features |
-|---|---|---|
-| docker/docker_production.md | Dockerfile (5 languages) | 13 rules, Non-root, Multi-stage |
-| k8s/argocd.md | ArgoCD ApplicationSet | App-of-Apps, Auto-heal, Namespacing |
-| cicd/github_actions.md | GitHub Actions CI/CD | Path scoped triggers, GitOps Push |
-| docs/secrets.md | secrets-required.md | Dependency mapping from code analysis |
-
-## Security
-
-- API keys are loaded from `.env` only — never hardcoded in source
-- `.env` is blocked by `.gitignore`
-- Path-traversal protection in file operations
-- API key security — auto-reads Kimchi CLI auth token from `~/.config/kimchi/harness/auth.json`
-- Containers run as UID 10001 (non-root, not a system UID)
-- No debugging tools (curl, wget, bash) in runtime images
-- All CI pipelines run Gitleaks, Trivy FS, Trivy Image, and OWASP ZAP scans
-- SARIF results uploaded to GitHub Security tab on every run
-- Artifact output sanitization — strips reasoning text from generated configs
-
-## Requirements
-
-```text
-langchain
-langgraph
-langchain-google-genai
-requests
-pyyaml
-pydantic>=2.0
-python-dotenv>=1.0.0
-requests>=2.31.0
-```
-
----
-
-## Changelog v2.0.0
-
-- Multi-provider LLM routing (Kimchi / Local / Remote)
-- API key security — auto-reads Kimchi CLI auth token
-- Path-traversal protection in file operations
-- Artifact output sanitization — strips reasoning text from generated configs
-- 120s health check timeout support for Cloudflare-proxied APIs
-- Graceful fallback when chromadb is not installed
+MIT

@@ -46,3 +46,10 @@ class Run(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     project = relationship("Project", back_populates="runs")
+
+# Imported models — relationships managed in their own modules
+from src.db.models_video import VideoTask  # noqa: F401,E402
+from src.db.models_agent import Agent  # noqa: F401,E402
+from src.db.models_evaluation import EvaluationResult  # noqa: F401,E402
+from src.db.models_apikey import ApiKey  # noqa: F401,E402
+from src.db.models_audit import AuditLog  # noqa: F401,E402

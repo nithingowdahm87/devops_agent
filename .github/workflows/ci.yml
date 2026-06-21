@@ -1,0 +1,24 @@
+name: DevOps Agent CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+
+      - run: uv pip install -e ".[test]"
+      - run: pytest tests/test_api_*.py -v
+      - run: |
+          python main.py --mode server --port 8000 &
+          sleep 5
+          python scripts/http_client_tests.py

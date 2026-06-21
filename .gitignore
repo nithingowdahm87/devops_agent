@@ -4,7 +4,12 @@
 !.env.example
 
 # LLM prompt cache — never commit
+# Generated artifacts
+SECRETS_REFERENCE.md
+*.db
+devops_agent.db
 .cache/
+
 
 # Python
 __pycache__/

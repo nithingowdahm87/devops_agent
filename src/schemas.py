@@ -118,3 +118,10 @@ class AuditEntry(BaseModel):
     user_feedback: str = ""
     cycle: int = 1
     drafts_count: int = 0
+
+
+# Imported schemas from feature modules
+from src.schemas_video import VideoTaskCreate, VideoTaskRead, VideoTaskUpdate  # noqa: F401,E402
+from src.schemas_agent import AgentCreate, AgentRead, AgentUpdate, HeartbeatUpdate  # noqa: F401,E402
+from src.schemas_evaluation import EvaluationCreate, EvaluationRead, EvaluationRequest  # noqa: F401,E402
+from src.schemas_apikey import ApiKeyCreate, ApiKeyRead, ApiKeyCreatedResponse  # noqa: F401,E402

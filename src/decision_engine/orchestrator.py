@@ -206,6 +206,9 @@ class V2Orchestrator:
 
         # 3. Discover and Isolate Contexts (Overhaul 1)
         services = context.microservice_dirs
+        # Monolith fallback: ensure at least the root dir is processed for per-service stages
+        if is_mono and not services:
+            services = ["."]
         if target_service:
             services = [target_service] if target_service in services else []
             print(f"🎯 Target Service Filter: {target_service} (Found: {len(services) > 0})")
@@ -418,6 +421,7 @@ class V2Orchestrator:
                 "dockerfile": "Dockerfile",
                 "docker_compose": "docker-compose.yml",
                 "kubernetes": "k8s-deployment.yaml",
+                "github_actions": "gha-ci.yml",
                 "cicd": "gha-ci.yml"
             }
             fb_path = os.path.join(FALLBACK_DIR, fb_map.get(stage_key, "Dockerfile"))
@@ -425,7 +429,7 @@ class V2Orchestrator:
             if os.path.exists(fb_path):
                 content = read_file(fb_path)
                 # Mock a candidate
-                from dataclasses import dataclass
+                from dataclasses import dataclass, field
                 @dataclass
                 class MockCandidate:
                     file_content: str
@@ -434,6 +438,9 @@ class V2Orchestrator:
                     security_score: int = 50
                     compliance_score: int = 50
                     best_practice_score: int = 60
+                    complexity_score: int = 30
+                    performance_score: int = 60
+                    violations: list = field(default_factory=list)
                 candidates.append(MockCandidate(file_content=content))
         else:
             # Sequential execution — Ollama processes requests one at a time;
@@ -550,7 +557,7 @@ class V2Orchestrator:
                     rel_path = rel_path.strip()
                     # ─── New Tiered Output Structure (Overhaul 10) ──────────
                     if service_name:
-                        rel_path = f"outputs/per-service/{service_name}/{rel_path}"
+                        rel_path = os.path.normpath(f"outputs/per-service/{service_name}/{rel_path}")
                     elif stage_key == "docker_compose":
                         rel_path = f"outputs/shared/{rel_path}"
                     elif stage_key == "gitops_manifests":
@@ -611,9 +618,11 @@ class V2Orchestrator:
                 return processed_files
             else:
                 # BUG FIX: fix the cicd/k8s fallback filenames
+                # Handle monolith root service_name (".") gracefully for per-service stages
+                _svc_name = service_name if service_name and service_name != "." else "service"
                 filename_map = {
                     "cicd":            ".github/workflows/ci.yml",
-                    "github_actions":  f".github/workflows/{service_name or 'service'}-ci.yml",
+                    "github_actions":  f".github/workflows/{_svc_name}-ci.yml",
                     "docker_compose":  "docker-compose.yml",
                     "dockerfile":      "Dockerfile",
                     "kubernetes":      "k8s/manifests.yaml",
@@ -624,7 +633,7 @@ class V2Orchestrator:
                 
                 # ─── New Tiered Output Structure (Overhaul 10) ──────────
                 if service_name:
-                    filename = f"outputs/per-service/{service_name}/{filename}"
+                    filename = os.path.normpath(f"outputs/per-service/{service_name}/{filename}")
                 elif stage_key == "docker_compose":
                     filename = f"outputs/shared/{filename}"
                 elif stage_key == "gitops_manifests":

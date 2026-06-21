@@ -71,3 +71,10 @@ def get_runs_by_project(db: Session, project_id: int, owner_id: int):
         models.Run.project_id == project_id,
         models.Project.owner_id == owner_id
     ).order_by(models.Run.created_at.desc()).all()
+
+
+from src.db.crud_video import create_video_task, get_video_tasks, get_video_task, update_video_task, delete_video_task  # noqa: F401,E402
+from src.db.crud_agent import create_agent, get_agents, get_agent, update_agent, delete_agent, update_heartbeat  # noqa: F401,E402
+from src.db.crud_evaluation import create_evaluation, get_evaluations, get_evaluation, delete_evaluation  # noqa: F401,E402
+from src.db.crud_apikey import create_api_key, get_api_key_by_hash, revoke_api_key, list_api_keys  # noqa: F401,E402
+from src.db.crud_audit import log_audit  # noqa: F401,E402
