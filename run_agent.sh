@@ -1,4 +1,6 @@
 #!/bin/bash
+# LOCAL DEVELOPMENT ONLY — not used inside Docker containers.
+# For Docker, see docker-entrypoint.sh.
 
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
@@ -27,5 +29,5 @@ else
 fi
 
 # Run the Agent
-# Updated to use the new v2.0.0 Sovereign Engine (agent.py)
+# Updated to use the v1.0.0 Sovereign Engine
 python3 main.py "$@"

@@ -20,20 +20,17 @@ from src.config.settings import settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     setup_logging()
-    Base.metadata.create_all(bind=engine)
-    try:
-        import alembic.config
-        import alembic.command
-        alembic_cfg = alembic.config.Config("alembic.ini")
-        alembic.command.upgrade(alembic_cfg, "head")
-    except Exception as e:
-        if settings.ENVIRONMENT != "development":
-            raise
-        # In dev, quietly ignore alembic issues (not yet configured or already up-to-date)
+    if settings.ENVIRONMENT == "development":
+        Base.metadata.create_all(bind=engine)
+        try:
+            import alembic.config
+            import alembic.command
+            alembic_cfg = alembic.config.Config("alembic.ini")
+            alembic.command.upgrade(alembic_cfg, "head")
+        except Exception:
+            pass
     yield
-    # Shutdown
 
 
 app = FastAPI(
@@ -57,9 +54,10 @@ app.add_middleware(PrometheusMiddleware)
 app.add_middleware(AuditLogMiddleware)
 
 # CORS
+origins = [o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",") if o.strip()] if settings.CORS_ALLOWED_ORIGINS else []
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.ENVIRONMENT == "development" else ["https://yourdomain.com"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,4 +81,4 @@ app.include_router(metrics_router.router, prefix="", tags=["metrics"])
 # Static web UI (will serve index.html from src/web/static/)
 # Create directory if it doesn't exist to avoid startup crash
 os.makedirs("src/web/static", exist_ok=True)
-app.mount("/", StaticFiles(directory="src/web/static", html=True), name="static")
+app.mount("/ui/", StaticFiles(directory="src/web/static", html=True), name="static")

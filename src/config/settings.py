@@ -24,9 +24,12 @@ class Settings(BaseSettings):
 
     RATE_LIMIT_DEFAULT: str = Field(default="100/minute")
     RATE_LIMIT_WRITE: str = Field(default="20/minute")
-    MAX_REQUEST_BODY_SIZE_MB: int = Field(default=10)
     REDIS_URL: str | None = Field(default=None)
     SENTRY_DSN: str | None = Field(default=None)
+
+    # CORS: comma-separated list of allowed origins. Production should restrict this.
+    CORS_ALLOWED_ORIGINS: str = Field(default="http://localhost:3000,http://localhost:5173")
+    LOG_JSON: bool = Field(default=False)
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
