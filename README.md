@@ -1,6 +1,7 @@
 # 🚀 DevOps Agent — Multi-Agent DevOps Automation Platform
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
+![Version 1.0.0](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![FastAPI](https://img.shields.io/badge/fastapi-0.100+-green.svg)
 ![SQLAlchemy](https://img.shields.io/badge/sqlalchemy-2.0+-orange.svg)
 ![Tests Passing](https://img.shields.io/badge/tests-22%20passing-brightgreen.svg)

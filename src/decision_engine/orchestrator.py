@@ -868,7 +868,7 @@ class V2Orchestrator:
             # Minimal README/Structure
             readme_content = (
                 "# GitOps Repository\n"
-                "Managed by UrbanOps Agent v2.0.0\n\n"
+                "Managed by UrbanOps Agent v1.0.0\n\n"
                 "## Directory Layout\n"
                 "- `argocd/applicationset.yaml`: The master App-of-Apps generator mapping to `apps/*`.\n"
                 "- `namespaces/`: Contains the isolated `<svc_name>.yaml` Namespace declarations.\n"

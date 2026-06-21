@@ -28,8 +28,10 @@ async def lifespan(app: FastAPI):
         import alembic.command
         alembic_cfg = alembic.config.Config("alembic.ini")
         alembic.command.upgrade(alembic_cfg, "head")
-    except Exception:
-        pass  # Alembic not configured or DB already up-to-date
+    except Exception as e:
+        if settings.ENVIRONMENT != "development":
+            raise
+        # In dev, quietly ignore alembic issues (not yet configured or already up-to-date)
     yield
     # Shutdown
 

@@ -652,7 +652,7 @@ def run_cli(args):
     audit = AuditLog(run_id=run_id)
     publisher = GitOpsPublisher()
     
-    print_header(f"DevOps AI Agent Pipeline v2.0.0 [run:{run_id}]")
+    print_header(f"DevOps AI Agent Pipeline v1.0.0 [run:{run_id}]")
     logger.info("Pipeline started | gitops_mode=%s", publisher.mode, extra={"stage": "init"})
     
     project_path = args.path or input("Enter project path: ").strip()
@@ -675,7 +675,7 @@ def run_cli(args):
             choice = '1'
         else:
             print("\n--- DevOps AI Agent (v12.0) ---")
-            print("1. 🧠  Start Automated DevOps Generation (Auto-Pilot / v2.0.0)")
+            print("1. 🧠  Start Automated DevOps Generation (Auto-Pilot / v1.0.0)")
             print("2. 🛠️   Run Specific Stages Manually (Legacy)")
             print("q. Exit")
             
@@ -739,7 +739,7 @@ def run_server(args):
 def main():
     """Dual-mode entry point: CLI or Server."""
     import argparse
-    parser = argparse.ArgumentParser(description="DevOps AI Agent Pipeline v3.0.0")
+    parser = argparse.ArgumentParser(description="DevOps AI Agent Pipeline v1.0.0")
     parser.add_argument("--mode", choices=["cli", "server"], default="cli",
                         help="Run mode: 'cli' for interactive pipeline, 'server' for FastAPI backend")
 

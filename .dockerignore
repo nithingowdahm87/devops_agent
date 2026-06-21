@@ -17,6 +17,7 @@ venv/
 .env.example
 *.pem
 *.key
+*.db
 
 # Runtime outputs
 outputs/

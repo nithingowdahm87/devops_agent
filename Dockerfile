@@ -4,7 +4,7 @@
 # ============================================================
 ARG PYTHON_VERSION=3.12
 ARG GIT_SHA=""
-ARG APP_VERSION="2.0.0"
+ARG APP_VERSION="1.0.0"
 ARG BUILD_DATE=""
 
 # ── Stage 1: Builder ─────────────────────────────────────────
@@ -80,4 +80,4 @@ USER appuser
 
 # The agent requires a project path as argument
 ENTRYPOINT ["python3", "main.py"]
-CMD ["python3", "main.py", "--mode", "server", "--port", "8000"]
+CMD ["--mode", "server", "--port", "8000"]

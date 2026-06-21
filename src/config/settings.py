@@ -5,7 +5,7 @@ from pydantic import Field
 
 class Settings(BaseSettings):
     APP_NAME: str = "DevOps Agent"
-    APP_VERSION: str = "3.0.0"
+    APP_VERSION: str = "1.0.0"
     ENVIRONMENT: str = Field(default="development")
 
     SERVER_HOST: str = Field(default="0.0.0.0")

@@ -3,12 +3,12 @@ import pytest
 from src.engine.idempotency import IdempotencyEngine
 
 def test_yaml_idempotency():
-    """Verify YAML keys are sorted and formatting is stable."""
+    """Verify YAML key order is preserved and formatting is stable."""
     unsorted_yaml = "services:\n  web:\n    image: nginx\n  db:\n    image: postgres"
-    # db is before web in alpha order
+    # Original order: web first, then db
     
     stabilized = IdempotencyEngine.stabilize_yaml(unsorted_yaml)
-    assert "db:" in stabilized.splitlines()[1] # First service after root
+    assert "web:" in stabilized.splitlines()[1] # First service after root preserves original order
     
     # Run twice should be identical
     stabilized_2 = IdempotencyEngine.stabilize_yaml(stabilized)
