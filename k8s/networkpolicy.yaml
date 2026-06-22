@@ -1,3 +1,11 @@
+# NOTE: This NetworkPolicy assumes the app only needs egress to:
+#   - DNS (UDP/TCP 53)
+#   - Postgres (5432)
+#   - Redis (6379)
+#   - HTTPS external APIs (TCP 443)
+# If you use local LLM providers on non-standard ports (e.g., llama.cpp on 8080),
+# add the required ports to the egress rules below.
+
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

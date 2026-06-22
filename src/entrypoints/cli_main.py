@@ -156,7 +156,7 @@ def run_cli(args):
         if auto_select:
             choice = '1'
         else:
-            print("\n--- DevOps AI Agent (v12.0) ---")
+            print("\n--- DevOps AI Agent (v1.0.0) ---")
             print("1. 🧠  Start Automated DevOps Generation (Auto-Pilot / v1.0.0)")
             if legacy_mode:
                 print("2. 🛠️   Run Specific Stages Manually (Legacy)")

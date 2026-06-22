@@ -296,8 +296,7 @@ class V2Orchestrator:
             if os.path.exists(fpath):
                 try: os.remove(fpath)
                 except Exception: pass
-        import sys
-        sys.exit(0)
+        return
 
         
     def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan, environment: str = "dev", no_llm: bool = False, service_name: str = None, no_prompts: bool = False, no_heal: bool = False):

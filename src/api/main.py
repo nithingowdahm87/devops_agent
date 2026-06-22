@@ -1,6 +1,6 @@
 """FastAPI application factory."""
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -16,6 +16,23 @@ from src.api.audit_middleware import AuditLogMiddleware
 from src.api.routers import apikeys, metrics as metrics_router
 
 from src.config.settings import settings
+from src.api.rate_limit import check_limit
+
+
+def rate_limit_dependency(request: Request):
+    """Dependency that enforces the default rate limit on every request."""
+    client_ip = request.client.host if request.client else "unknown"
+    key = f"{client_ip}:{request.url.path}"
+    if not check_limit(key, settings.RATE_LIMIT_DEFAULT):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
+
+def rate_limit_write_dependency(request: Request):
+    """Dependency that enforces the stricter write rate limit."""
+    client_ip = request.client.host if request.client else "unknown"
+    key = f"write:{client_ip}:{request.url.path}"
+    if not check_limit(key, settings.RATE_LIMIT_WRITE):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
 
 @asynccontextmanager
@@ -66,13 +83,36 @@ app.add_middleware(
 # Request logging
 app.add_middleware(RequestLoggingMiddleware)
 
-# API routers
-app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
-app.include_router(projects.router, prefix="/api/v1/projects", tags=["projects"])
-app.include_router(runs.router, prefix="/api/v1/runs", tags=["runs"])
+# API routers — rate-limit all endpoints by default; write endpoints use stricter limit
+# Read endpoints: projects list, runs list, agents list
+_read_routers = [
+    (projects.router, "/api/v1/projects", ["projects"]),
+    (runs.router, "/api/v1/runs", ["runs"]),
+    (agents.router, "", ["agents"]),
+]
+# Write endpoints (stricter rate limit)
+_write_routers = [
+    (auth.router, "/api/v1/auth", ["auth"]),
+]
+
+for _router, _prefix, _tags in _read_routers:
+    app.include_router(
+        _router,
+        prefix=_prefix,
+        tags=_tags,
+        dependencies=[Depends(rate_limit_dependency)],
+    )
+
+for _router, _prefix, _tags in _write_routers:
+    app.include_router(
+        _router,
+        prefix=_prefix,
+        tags=_tags,
+        dependencies=[Depends(rate_limit_write_dependency)],
+    )
+
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 app.include_router(video.router, prefix="", tags=["video"])
-app.include_router(agents.router, prefix="", tags=["agents"])
 app.include_router(evaluation.router, prefix="", tags=["evaluation"])
 app.include_router(apikeys.router, prefix="/api/v1/auth/api-keys", tags=["auth"])
 app.include_router(metrics_router.router, prefix="", tags=["metrics"])
