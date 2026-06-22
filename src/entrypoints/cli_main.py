@@ -150,6 +150,7 @@ def run_cli(args):
 
     # Auto-select V2 Auto-Pilot if no prompt mode is enabled
     auto_select = getattr(args, "no_prompts", False)
+    legacy_mode = getattr(args, "legacy", False)
 
     while True:
         if auto_select:
@@ -157,9 +158,11 @@ def run_cli(args):
         else:
             print("\n--- DevOps AI Agent (v12.0) ---")
             print("1. 🧠  Start Automated DevOps Generation (Auto-Pilot / v1.0.0)")
-            print("2. 🛠️   Run Specific Stages Manually (Legacy)")
-            print("q. Exit")
-
+            if legacy_mode:
+                print("2. 🛠️   Run Specific Stages Manually (Legacy)")
+                print("q. Exit")
+            else:
+                print("q. Exit")
             choice = input("Select: ").strip().lower()
 
         if choice == '1':
@@ -176,7 +179,7 @@ def run_cli(args):
                 no_prompts=getattr(args, "no_prompts", False),
                 no_heal=args.no_heal,
             )
-        elif choice == '2':
+        elif choice == '2' and legacy_mode:
             run_manual_menu(project_path, context, audit, publisher, run_id)
         elif choice == 'q':
             break

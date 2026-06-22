@@ -1,0 +1,17 @@
+apiVersion: v2
+name: devops-agent
+description: AI-powered multi-agent DevOps pipeline
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+home: https://github.com/OWNER/REPO
+sources:
+  - https://github.com/OWNER/REPO
+maintainers:
+  - name: DevOps Agent Team
+    email: devops@example.com
+keywords:
+  - devops
+  - ai
+  - agent
+  - pipeline

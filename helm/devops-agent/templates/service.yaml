@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "devops-agent.fullname" . }}
+  labels:
+    {{- include "devops-agent.labels" . | nindent 4 }}
+    app: devops-agent
+    version: {{ .Chart.AppVersion | quote }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "devops-agent.selectorLabels" . | nindent 4 }}

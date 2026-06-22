@@ -1,0 +1,168 @@
+# Default values for devops-agent.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# -- Number of pod replicas
+replicaCount: 2
+
+image:
+  # -- Image repository
+  repository: devops-agent
+  # -- Image tag (overrides Chart.appVersion if set)
+  tag: "1.0.0"
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+
+# -- Image pull secrets (for private registries)
+imagePullSecrets: []
+
+# -- Override the name of the chart
+nameOverride: ""
+# -- Override the full name of resources
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Specifies whether a service account should be created
+  create: true
+  # -- Annotations to add to the service account
+  annotations: {}
+  # -- The name of the service account to use
+  name: ""
+
+# -- Pod-level annotations
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8000"
+  prometheus.io/path: "/metrics"
+
+# -- Pod-level labels
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  # -- Service type
+  type: ClusterIP
+  # -- Service port
+  port: 80
+  # -- Container target port
+  targetPort: 8000
+
+ingress:
+  # -- Enable ingress resource
+  enabled: false
+  # -- Ingress class name
+  className: nginx
+  # -- Ingress annotations
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  # -- Ingress hosts
+  hosts:
+    - host: devops-agent.local
+      paths:
+        - path: /
+          pathType: Prefix
+  # -- TLS configuration
+  tls: []
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+autoscaling:
+  # -- Enable Horizontal Pod Autoscaler
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# -- Node selector for pod assignment
+nodeSelector: {}
+
+# -- Tolerations
+tolerations: []
+
+# -- Affinity rules
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - devops-agent
+          topologyKey: kubernetes.io/hostname
+
+# Application configuration
+appConfig:
+  appName: "DevOps Agent"
+  appVersion: "1.0.0"
+  environment: production
+  serverHost: 0.0.0.0
+  serverPort: 8000
+  logJson: true
+  corsAllowedOrigins: ""
+
+# Secrets (base64 encoded values — replace in production via --set or external secrets)
+secrets:
+  databaseUrl: "postgresql://user:pass@db:5432/devops_agent"
+  openaiApiKey: "REPLACE_ME"
+  githubToken: "REPLACE_ME"
+
+# Probes
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8000
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Update strategy
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+# Prometheus ServiceMonitor
+serviceMonitor:
+  # -- Create ServiceMonitor resource (requires prometheus-operator CRDs)
+  enabled: false
+  # -- ServiceMonitor interval
+  interval: 30s
+  # -- ServiceMonitor scrape timeout
+  scrapeTimeout: 10s
+  # -- ServiceMonitor path
+  path: /metrics

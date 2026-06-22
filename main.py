@@ -31,6 +31,7 @@ def main():
                         help="LLM provider mode")
     parser.add_argument("path", type=str, nargs="?", help="Project path")
     parser.add_argument("--port", type=int, help="Server port (server mode only)")
+    parser.add_argument("--legacy", action="store_true", help="Run legacy manual menu instead of auto-pilot")
 
     args = parser.parse_args()
 
