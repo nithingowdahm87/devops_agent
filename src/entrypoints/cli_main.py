@@ -179,6 +179,8 @@ def run_cli(args):
                 no_prompts=getattr(args, "no_prompts", False),
                 no_heal=args.no_heal,
             )
+            if auto_select:
+                break
         elif choice == '2' and legacy_mode:
             run_manual_menu(project_path, context, audit, publisher, run_id)
         elif choice == 'q':

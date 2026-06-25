@@ -24,7 +24,8 @@ class TestGetKimchiApiKey:
     def test_auth_json_fallback(self):
         """When env var is not set, falls back to auth.json."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            auth_file = Path(tmpdir) / "auth.json"
+            auth_file = Path(tmpdir) / ".config" / "kimchi" / "harness" / "auth.json"
+            auth_file.parent.mkdir(parents=True, exist_ok=True)
             auth_file.write_text(json.dumps({
                 "kimchi-dev": {"access": "json-fallback-key-67890"}
             }))

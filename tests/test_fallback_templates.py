@@ -15,4 +15,4 @@ def test_fallback_generation(tmp_path):
     with open(os.path.join(FALLBACK_DIR, "Dockerfile"), "r", encoding="utf-8") as f:
         content = f.read()
         assert "FROM node:20-alpine" in content
-        assert "USER node" in content # Best practice preserved in fallback
+        assert "USER appuser" in content # Best practice preserved in fallback
