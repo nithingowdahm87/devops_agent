@@ -1,3 +1,4 @@
+
 version: "3.9"
 
 networks:
@@ -73,3 +74,4 @@ volumes:
 secrets:
   mongo_root_password:
     external: true
+

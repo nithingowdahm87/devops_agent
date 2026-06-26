@@ -1,0 +1,8 @@
+
+# syntax=docker/dockerfile:1.6
+FROM nginx:alpine
+COPY . /usr/share/nginx/html/
+EXPOSE 8080
+LABEL org.opencontainers.image.source="https://github.com/OWNER/REPO"
+LABEL org.opencontainers.image.description="Static HTML Frontend"
+

@@ -1,3 +1,4 @@
+
 FILENAME: k8s/namespace.yaml
 ```yaml
 apiVersion: v1
@@ -40,10 +41,10 @@ FILENAME: k8s/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: api
+  name: {service_name}
   namespace: sample-api
   labels:
-    app: api
+    app: {service_name}
 spec:
   replicas: 3
   strategy:
@@ -53,14 +54,14 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: api
+      app: {service_name}
   template:
     metadata:
       labels:
-        app: api
+        app: {service_name}
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "3000"
+        prometheus.io/port: "{port}"
         prometheus.io/path: "/metrics"
     spec:
       securityContext:
@@ -74,9 +75,9 @@ spec:
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
-              app: api
+              app: {service_name}
       containers:
-        - name: api
+        - name: {service_name}
           image: "ghcr.io/OWNER/REPO:v1.0.0"
           imagePullPolicy: IfNotPresent
           envFrom:
@@ -94,7 +95,7 @@ spec:
                   name: api-secrets
                   key: JWT_SECRET
           ports:
-            - containerPort: 3000
+            - containerPort: {port}
               protocol: TCP
           resources:
             requests:
@@ -112,7 +113,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: 3000
+              port: "{port}"
             initialDelaySeconds: 10
             periodSeconds: 15
             timeoutSeconds: 5
@@ -120,7 +121,7 @@ spec:
           readinessProbe:
             httpGet:
               path: /health
-              port: 3000
+              port: "{port}"
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 3
@@ -145,7 +146,7 @@ spec:
                     - key: app
                       operator: In
                       values:
-                        - api
+                        - {service_name}
                 topologyKey: kubernetes.io/hostname
 ```
 
@@ -154,15 +155,15 @@ FILENAME: k8s/service.yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: api
+  name: {service_name}
   namespace: sample-api
 spec:
   type: ClusterIP
   selector:
-    app: api
+    app: {service_name}
   ports:
     - port: 80
-      targetPort: 3000
+      targetPort: "{port}"
       protocol: TCP
       name: http
 ```
@@ -172,7 +173,7 @@ FILENAME: k8s/ingress.yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: api
+  name: {service_name}
   namespace: sample-api
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
@@ -192,7 +193,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: api
+                name: {service_name}
                 port:
                   number: 80
 ```
@@ -202,13 +203,13 @@ FILENAME: k8s/hpa.yaml
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: api
+  name: {service_name}
   namespace: sample-api
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: api
+    name: {service_name}
   minReplicas: 2
   maxReplicas: 10
   metrics:
@@ -238,13 +239,13 @@ FILENAME: k8s/pdb.yaml
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: api
+  name: {service_name}
   namespace: sample-api
 spec:
   minAvailable: 1
   selector:
     matchLabels:
-      app: api
+      app: {service_name}
 ```
 
 FILENAME: k8s/networkpolicy.yaml
@@ -252,12 +253,12 @@ FILENAME: k8s/networkpolicy.yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: api-network-policy
+  name: {service_name}-network-policy
   namespace: sample-api
 spec:
   podSelector:
     matchLabels:
-      app: api
+      app: {service_name}
   policyTypes:
     - Ingress
     - Egress
@@ -268,15 +269,8 @@ spec:
               name: ingress-nginx
       ports:
         - protocol: TCP
-          port: 3000
+          port: "{port}"
   egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              app: mongo
-      ports:
-        - protocol: TCP
-          port: 27017
     - to:
         - namespaceSelector: {}
           podSelector:
@@ -286,3 +280,4 @@ spec:
         - protocol: UDP
           port: 53
 ```
+

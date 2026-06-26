@@ -1,3 +1,4 @@
+
 # syntax=docker/dockerfile:1.6
 
 # ─── Dependencies Stage ─────────────────────────────────
@@ -21,9 +22,9 @@ ENV NODE_ENV=production
 ENV PORT=3000
 USER appuser
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:3000/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3   CMD wget -qO- http://localhost:3000/health || exit 1
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "server.js"]
 LABEL org.opencontainers.image.source="https://github.com/OWNER/REPO"
 LABEL org.opencontainers.image.description="Node.js Express API"
+

@@ -1,3 +1,4 @@
+
 name: CI Pipeline
 
 on:
@@ -84,3 +85,4 @@ jobs:
       - name: Smoke test
         if: github.ref == 'refs/heads/main'
         run: docker run -d --name smoke -p 3001:3000 ${{ steps.meta.outputs.tags }} && sleep 5 && curl -sSf http://localhost:3001/health || exit 1 && curl -sSf http://localhost:3001/metrics || exit 1 && docker rm -f smoke
+

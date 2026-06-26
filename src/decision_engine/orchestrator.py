@@ -299,6 +299,41 @@ class V2Orchestrator:
         return
 
         
+    def _detect_service_lang(self, project_path: str, service_name: str | None, context: ProjectContext) -> str:
+        """Refine language detection using filesystem heuristics."""
+        svc_path = os.path.join(project_path, service_name) if service_name else project_path
+        lang = getattr(context, "language", "node").lower()
+        if service_name and context.microservice_details:
+            svc_detail = context.microservice_details.get(service_name, {})
+            lang = svc_detail.get("language", lang).lower()
+
+        # Filesystem heuristics override analysis when we're confident
+        if os.path.exists(os.path.join(svc_path, "requirements.txt")):
+            return "python"
+        if os.path.exists(os.path.join(svc_path, "Pipfile")):
+            return "python"
+        pkg_json = os.path.join(svc_path, "package.json")
+        if os.path.exists(pkg_json):
+            try:
+                import json
+                with open(pkg_json, "r", encoding="utf-8") as f:
+                    pkg = json.load(f)
+                deps = pkg.get("dependencies") or pkg.get("devDependencies")
+                if not deps and os.path.exists(os.path.join(svc_path, "index.html")):
+                    return "html"
+            except Exception:
+                pass
+            return "node"
+        if os.path.exists(os.path.join(svc_path, "Cargo.toml")):
+            return "rust"
+        if os.path.exists(os.path.join(svc_path, "go.mod")):
+            return "go"
+        if os.path.exists(os.path.join(svc_path, "Gemfile")):
+            return "ruby"
+        if os.path.exists(os.path.join(svc_path, "pom.xml")) or os.path.exists(os.path.join(svc_path, "build.gradle")):
+            return "java"
+        return lang
+
     def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan, environment: str = "dev", no_llm: bool = False, service_name: str = None, no_prompts: bool = False, no_heal: bool = False):
         print(f"\n--- Stage: {display_name} ---")
         
@@ -416,19 +451,65 @@ class V2Orchestrator:
         if no_llm:
             print(f"  [!] no-llm mode enabled. Skipping generation for {stage_key}.")
             from src.engine.fallbacks import FALLBACK_DIR
-            fb_map = {
-                "dockerfile": "Dockerfile",
-                "docker_compose": "docker-compose.yml",
-                "kubernetes": "k8s-deployment.yaml",
-                "github_actions": "gha-ci.yml",
-                "cicd": "gha-ci.yml"
-            }
-            fb_path = os.path.join(FALLBACK_DIR, fb_map.get(stage_key, "Dockerfile"))
             from src.tools.file_ops import read_file
+            from dataclasses import dataclass, field
+
+            # --- Language & service detection ---
+            lang = self._detect_service_lang(project_path, service_name, context)
+            svc_detail = {}
+            if getattr(context, "microservice_dirs", None) and service_name:
+                svc_detail = context.microservice_details.get(service_name, {}) or {}
+
+            def _is_python(l: str) -> bool:
+                return any(tok in l for tok in ("python", "flask", "django", "fastapi"))
+            def _is_static(l: str) -> bool:
+                return any(tok in l for tok in ("html", "static"))
+
+            # --- Stage-specific fallback selection ---
+            if stage_key == "dockerfile":
+                if _is_python(lang):
+                    fb_file = "Dockerfile.python"
+                elif _is_static(lang):
+                    fb_file = "Dockerfile.static"
+                else:
+                    fb_file = "Dockerfile"  # Node.js default
+            elif stage_key == "docker_compose":
+                if len(getattr(context, "microservice_dirs", []) or []) > 1:
+                    fb_file = "docker-compose.multi.yml"
+                else:
+                    fb_file = "docker-compose.yml"
+            elif stage_key in ("github_actions", "cicd"):
+                if _is_python(lang):
+                    fb_file = "gha-ci.python.yml"
+                elif _is_static(lang):
+                    fb_file = "gha-ci.static.yml"
+                else:
+                    fb_file = "gha-ci.yml"  # Node.js default
+            else:
+                # kubernetes and any other stage
+                fb_file = "k8s-deployment.yaml"
+
+            fb_path = os.path.join(FALLBACK_DIR, fb_file)
+
             if os.path.exists(fb_path):
                 content = read_file(fb_path)
+
+                # --- Kubernetes: replace placeholders with real service values ---
+                if stage_key == "kubernetes":
+                    svc = service_name or getattr(context, "project_name", "app")
+                    port = "3000"
+                    if getattr(context, "microservice_dirs", None) and service_name:
+                        ports = svc_detail.get("ports") or ["3000"]
+                        if ports:
+                            port = str(ports[0])
+                    else:
+                        ports = getattr(context, "ports", []) or []
+                        if ports:
+                            port = str(ports[0])
+                    content = content.replace("{service_name}", svc)
+                    content = content.replace("{port}", port)
+
                 # Mock a candidate
-                from dataclasses import dataclass, field
                 @dataclass
                 class MockCandidate:
                     file_content: str

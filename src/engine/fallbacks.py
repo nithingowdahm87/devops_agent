@@ -5,7 +5,7 @@ import os
 FALLBACK_DIR = os.path.join(os.path.dirname(__file__), "templates/fallback")
 os.makedirs(FALLBACK_DIR, exist_ok=True)
 
-# DOCKERFILE Fallback
+# DOCKERFILE Fallback (Node.js / Express)
 DOCKERFILE_FALLBACK = """
 # syntax=docker/dockerfile:1.6
 
@@ -39,7 +39,48 @@ LABEL org.opencontainers.image.description="Node.js Express API"
 
 """
 
-# COMPOSE Fallback
+# DOCKERFILE Fallback (Python / Flask)
+DOCKERFILE_FALLBACK_PYTHON = """
+# syntax=docker/dockerfile:1.6
+# ─── Python Dependencies Stage ─────────────────────────────────
+FROM python:3.12-slim AS deps
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# ─── Production Stage ────────────────────────────────────
+FROM python:3.12-slim AS production
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+WORKDIR /app
+COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=deps /usr/local/bin /usr/local/bin
+COPY . .
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PORT=5000
+USER appuser
+EXPOSE 5000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" || exit 1
+ENTRYPOINT ["python", "-m", "gunicorn"]
+CMD ["-b", "0.0.0.0:5000", "app:app"]
+LABEL org.opencontainers.image.source="https://github.com/OWNER/REPO"
+LABEL org.opencontainers.image.description="Python Flask API"
+
+"""
+
+# DOCKERFILE Fallback (Static HTML / nginx)
+DOCKERFILE_FALLBACK_STATIC = """
+# syntax=docker/dockerfile:1.6
+FROM nginx:alpine
+COPY . /usr/share/nginx/html/
+EXPOSE 8080
+LABEL org.opencontainers.image.source="https://github.com/OWNER/REPO"
+LABEL org.opencontainers.image.description="Static HTML Frontend"
+
+"""
+
+# COMPOSE Fallback (Node.js + MongoDB)
 COMPOSE_FALLBACK = """
 version: "3.9"
 
@@ -119,6 +160,40 @@ secrets:
 
 """
 
+# COMPOSE Fallback (Multi-service: backend + frontend)
+COMPOSE_FALLBACK_MULTI = """
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+"""
+
 # K8S Fallback
 K8S_FALLBACK = """
 FILENAME: k8s/namespace.yaml
@@ -163,10 +238,10 @@ FILENAME: k8s/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: api
+  name: {service_name}
   namespace: sample-api
   labels:
-    app: api
+    app: {service_name}
 spec:
   replicas: 3
   strategy:
@@ -176,14 +251,14 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: api
+      app: {service_name}
   template:
     metadata:
       labels:
-        app: api
+        app: {service_name}
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "3000"
+        prometheus.io/port: "{port}"
         prometheus.io/path: "/metrics"
     spec:
       securityContext:
@@ -197,9 +272,9 @@ spec:
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
-              app: api
+              app: {service_name}
       containers:
-        - name: api
+        - name: {service_name}
           image: "ghcr.io/OWNER/REPO:v1.0.0"
           imagePullPolicy: IfNotPresent
           envFrom:
@@ -217,7 +292,7 @@ spec:
                   name: api-secrets
                   key: JWT_SECRET
           ports:
-            - containerPort: 3000
+            - containerPort: {port}
               protocol: TCP
           resources:
             requests:
@@ -235,7 +310,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: 3000
+              port: "{port}"
             initialDelaySeconds: 10
             periodSeconds: 15
             timeoutSeconds: 5
@@ -243,7 +318,7 @@ spec:
           readinessProbe:
             httpGet:
               path: /health
-              port: 3000
+              port: "{port}"
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 3
@@ -268,7 +343,7 @@ spec:
                     - key: app
                       operator: In
                       values:
-                        - api
+                        - {service_name}
                 topologyKey: kubernetes.io/hostname
 ```
 
@@ -277,15 +352,15 @@ FILENAME: k8s/service.yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: api
+  name: {service_name}
   namespace: sample-api
 spec:
   type: ClusterIP
   selector:
-    app: api
+    app: {service_name}
   ports:
     - port: 80
-      targetPort: 3000
+      targetPort: "{port}"
       protocol: TCP
       name: http
 ```
@@ -295,7 +370,7 @@ FILENAME: k8s/ingress.yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: api
+  name: {service_name}
   namespace: sample-api
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
@@ -315,7 +390,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: api
+                name: {service_name}
                 port:
                   number: 80
 ```
@@ -325,13 +400,13 @@ FILENAME: k8s/hpa.yaml
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: api
+  name: {service_name}
   namespace: sample-api
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: api
+    name: {service_name}
   minReplicas: 2
   maxReplicas: 10
   metrics:
@@ -361,13 +436,13 @@ FILENAME: k8s/pdb.yaml
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: api
+  name: {service_name}
   namespace: sample-api
 spec:
   minAvailable: 1
   selector:
     matchLabels:
-      app: api
+      app: {service_name}
 ```
 
 FILENAME: k8s/networkpolicy.yaml
@@ -375,12 +450,12 @@ FILENAME: k8s/networkpolicy.yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: api-network-policy
+  name: {service_name}-network-policy
   namespace: sample-api
 spec:
   podSelector:
     matchLabels:
-      app: api
+      app: {service_name}
   policyTypes:
     - Ingress
     - Egress
@@ -391,15 +466,8 @@ spec:
               name: ingress-nginx
       ports:
         - protocol: TCP
-          port: 3000
+          port: "{port}"
   egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              app: mongo
-      ports:
-        - protocol: TCP
-          port: 27017
     - to:
         - namespaceSelector: {}
           podSelector:
@@ -412,7 +480,7 @@ spec:
 
 """
 
-# CI Fallback
+# CI Fallback (Node.js)
 CI_FALLBACK = """
 name: CI Pipeline
 
@@ -503,6 +571,85 @@ jobs:
 
 """
 
+# CI Fallback (Python / pytest)
+CI_FALLBACK_PYTHON = """
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -r requirements.txt
+      - run: pytest tests/ -v --tb=short
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        continue-on-error: true
+
+  dockerfile-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: info
+
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        run: docker build -t ${{ env.IMAGE_NAME }}:latest .
+      - name: Smoke test
+        run: docker run -d --name smoke -p 5001:5000 ${{ env.IMAGE_NAME }}:latest && sleep 5 && curl -sSf http://localhost:5001/health || exit 1 && docker rm -f smoke
+
+"""
+
+# CI Fallback (Static HTML)
+CI_FALLBACK_STATIC = """
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        run: docker build -t app:latest .
+      - name: Smoke test
+        run: docker run -d --name smoke -p 8081:8080 app:latest && sleep 3 && curl -sSf http://localhost:8081/ || exit 1 && docker rm -f smoke
+
+"""
+
+
 def write_fallbacks():
     """Write fallback templates from bundled constants to disk."""
     fallback_map = {
@@ -510,11 +657,17 @@ def write_fallbacks():
         "docker-compose.yml": COMPOSE_FALLBACK,
         "k8s-deployment.yaml": K8S_FALLBACK,
         "gha-ci.yml": CI_FALLBACK,
+        "Dockerfile.python": DOCKERFILE_FALLBACK_PYTHON,
+        "Dockerfile.static": DOCKERFILE_FALLBACK_STATIC,
+        "docker-compose.multi.yml": COMPOSE_FALLBACK_MULTI,
+        "gha-ci.python.yml": CI_FALLBACK_PYTHON,
+        "gha-ci.static.yml": CI_FALLBACK_STATIC,
     }
     for filename, content in fallback_map.items():
         filepath = os.path.join(FALLBACK_DIR, filename)
         with open(filepath, "w", encoding="utf-8") as fh:
             fh.write(content)
+
 
 if __name__ == "__main__":
     write_fallbacks()
