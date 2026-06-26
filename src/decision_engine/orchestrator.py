@@ -299,41 +299,6 @@ class V2Orchestrator:
         return
 
         
-    def _detect_service_lang(self, project_path: str, service_name: str | None, context: ProjectContext) -> str:
-        """Refine language detection using filesystem heuristics."""
-        svc_path = os.path.join(project_path, service_name) if service_name else project_path
-        lang = getattr(context, "language", "node").lower()
-        if service_name and context.microservice_details:
-            svc_detail = context.microservice_details.get(service_name, {})
-            lang = svc_detail.get("language", lang).lower()
-
-        # Filesystem heuristics override analysis when we're confident
-        if os.path.exists(os.path.join(svc_path, "requirements.txt")):
-            return "python"
-        if os.path.exists(os.path.join(svc_path, "Pipfile")):
-            return "python"
-        pkg_json = os.path.join(svc_path, "package.json")
-        if os.path.exists(pkg_json):
-            try:
-                import json
-                with open(pkg_json, "r", encoding="utf-8") as f:
-                    pkg = json.load(f)
-                deps = pkg.get("dependencies") or pkg.get("devDependencies")
-                if not deps and os.path.exists(os.path.join(svc_path, "index.html")):
-                    return "html"
-            except Exception:
-                pass
-            return "node"
-        if os.path.exists(os.path.join(svc_path, "Cargo.toml")):
-            return "rust"
-        if os.path.exists(os.path.join(svc_path, "go.mod")):
-            return "go"
-        if os.path.exists(os.path.join(svc_path, "Gemfile")):
-            return "ruby"
-        if os.path.exists(os.path.join(svc_path, "pom.xml")) or os.path.exists(os.path.join(svc_path, "build.gradle")):
-            return "java"
-        return lang
-
     def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan, environment: str = "dev", no_llm: bool = False, service_name: str = None, no_prompts: bool = False, no_heal: bool = False):
         print(f"\n--- Stage: {display_name} ---")
         
@@ -449,79 +414,51 @@ class V2Orchestrator:
         
         candidates = []
         if no_llm:
-            print(f"  [!] no-llm mode enabled. Skipping generation for {stage_key}.")
-            from src.engine.fallbacks import FALLBACK_DIR
-            from src.tools.file_ops import read_file
+            print(f"  [!] no-llm mode enabled. Generating artifacts for {stage_key}.")
+            from src.engine.language_detector import LanguageDetector
+            from src.engine.artifact_generator import ArtifactGenerator
             from dataclasses import dataclass, field
 
-            # --- Language & service detection ---
-            lang = self._detect_service_lang(project_path, service_name, context)
-            svc_detail = {}
-            if getattr(context, "microservice_dirs", None) and service_name:
-                svc_detail = context.microservice_details.get(service_name, {}) or {}
+            detector = LanguageDetector()
+            generator = ArtifactGenerator()
 
-            def _is_python(l: str) -> bool:
-                return any(tok in l for tok in ("python", "flask", "django", "fastapi"))
-            def _is_static(l: str) -> bool:
-                return any(tok in l for tok in ("html", "static"))
+            # Detect stack for this service
+            svc_path = os.path.join(project_path, service_name) if service_name else project_path
+            stack = detector.detect(svc_path)
 
-            # --- Stage-specific fallback selection ---
+            # Generate artifact based on stage_key
+            content = ""
             if stage_key == "dockerfile":
-                if _is_python(lang):
-                    fb_file = "Dockerfile.python"
-                elif _is_static(lang):
-                    fb_file = "Dockerfile.static"
-                else:
-                    fb_file = "Dockerfile"  # Node.js default
+                content = generator.generate_dockerfile(stack, service_name or "app")
             elif stage_key == "docker_compose":
-                if len(getattr(context, "microservice_dirs", []) or []) > 1:
-                    fb_file = "docker-compose.multi.yml"
-                else:
-                    fb_file = "docker-compose.yml"
+                # Detect all service stacks
+                stacks = []
+                for svc_dir in getattr(context, "microservice_dirs", []):
+                    stacks.append(detector.detect(os.path.join(project_path, svc_dir)))
+                if not stacks:
+                    stacks = [stack]
+                content = generator.generate_docker_compose(stacks, project_name=getattr(context, "project_name", "app"))
+            elif stage_key == "kubernetes":
+                content = "\n---\n".join(generator.generate_k8s_manifests(stack, service_name or "app").values())
             elif stage_key in ("github_actions", "cicd"):
-                if _is_python(lang):
-                    fb_file = "gha-ci.python.yml"
-                elif _is_static(lang):
-                    fb_file = "gha-ci.static.yml"
-                else:
-                    fb_file = "gha-ci.yml"  # Node.js default
+                content = generator.generate_ci(stack, service_name or "app")
             else:
-                # kubernetes and any other stage
-                fb_file = "k8s-deployment.yaml"
+                # Fallback for unknown stages
+                content = f"# No-LLM fallback for {stage_key}\n# Detected stack: {stack.language}/{stack.framework}\n"
 
-            fb_path = os.path.join(FALLBACK_DIR, fb_file)
-
-            if os.path.exists(fb_path):
-                content = read_file(fb_path)
-
-                # --- Kubernetes: replace placeholders with real service values ---
-                if stage_key == "kubernetes":
-                    svc = service_name or getattr(context, "project_name", "app")
-                    port = "3000"
-                    if getattr(context, "microservice_dirs", None) and service_name:
-                        ports = svc_detail.get("ports") or ["3000"]
-                        if ports:
-                            port = str(ports[0])
-                    else:
-                        ports = getattr(context, "ports", []) or []
-                        if ports:
-                            port = str(ports[0])
-                    content = content.replace("{service_name}", svc)
-                    content = content.replace("{port}", port)
-
-                # Mock a candidate
-                @dataclass
-                class MockCandidate:
-                    file_content: str
-                    model_name: str = "Fallback-Template"
-                    reasoning: str = "Hardware-locked deterministic fallback"
-                    security_score: int = 50
-                    compliance_score: int = 50
-                    best_practice_score: int = 60
-                    complexity_score: int = 30
-                    performance_score: int = 60
-                    violations: list = field(default_factory=list)
-                candidates.append(MockCandidate(file_content=content))
+            # Mock a candidate (kept inline exactly as before)
+            @dataclass
+            class MockCandidate:
+                file_content: str
+                model_name: str = "Fallback-Template"
+                reasoning: str = "Hardware-locked deterministic fallback"
+                security_score: int = 50
+                compliance_score: int = 50
+                best_practice_score: int = 60
+                complexity_score: int = 30
+                performance_score: int = 60
+                violations: list = field(default_factory=list)
+            candidates.append(MockCandidate(file_content=content))
         else:
             # Sequential execution — Ollama processes requests one at a time;
             # parallel calls just queue up and timeout on 8 GB RAM machines.
@@ -548,12 +485,12 @@ class V2Orchestrator:
             if stage_key == "dockerfile":
                 if "from " in content and " as " in content:
                     score += 15  # multi-stage build reward
-                if "user " in content and ("adduser" in content or "useradd" in content or "appuser" in content):
+                if any(u in content for u in ["user appuser", "user appuser", "runuser"]):
                     score += 15  # non-root user
                 if "healthcheck" in content:
                     score += 10  # healthcheck presence
-                if "npm ci" in content or "pip install --no-cache-dir" in content:
-                    score += 5   # optimized installs
+                if "pip install" in content or "npm ci" in content or "cargo build" in content or "go build" in content or "mvn package" in content or "gradle build" in content:
+                    score += 5   # language-agnostic optimized build/install
                 if ":latest" not in content:
                     score += 5   # pinned versions
             
