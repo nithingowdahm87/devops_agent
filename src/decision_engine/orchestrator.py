@@ -254,13 +254,13 @@ class V2Orchestrator:
                         for f in res_files:
                             all_artifacts[f.path] = f.content
                 except Exception as stage_e:
+                    # LLMs are mandatory. Do NOT write placeholder files — that
+                    # hides real failures behind plausible-looking output. Surface
+                    # the failure loudly and leave all_artifacts untouched so
+                    # downstream stages know this one is missing.
                     logger.error("Stage %s failed: %s", stage, stage_e)
-                    logger.warning("LLM EXHAUSTION FALLBACK for stage %s — output is a placeholder only; manual generation required.", stage)
-                    print(f"⚠️  LLM EXHAUSTION FALLBACK: Stage {stage} failed. Output is a placeholder — manual generation required.")
-                    if stage == "kubernetes":
-                         all_artifacts["k8s/fallback.yaml"] = "# Fallback Kubernetes Manifest\n# Manual generation required."
-                    elif stage == "cicd":
-                         all_artifacts[".github/workflows/fallback.yml"] = "# Fallback CI/CD\n# Manual generation required."
+                    logger.error("LLM EXHAUSTION for stage %s — no placeholder file written. Manual generation required.", stage)
+                    print(f"❌ LLM EXHAUSTION: Stage {stage} failed ({stage_e}). No placeholder file written. Manual generation required.")
 
 
         # 7. Level 10 Post-Generation Stage (Audit & Manifest)
@@ -421,6 +421,17 @@ class V2Orchestrator:
                 candidates.append(g.generate(template, prompt_context, task_type=stage_key))
             except Exception as e:
                 logger.error(f"Generator failed: {e}")
+
+        # Filter out empty/trivial candidates. When all LLM providers fail or return
+        # empty content, LLMGenerator.generate() returns an InfraSpec with
+        # file_content="" and a generic model_name. Without this filter the evaluator
+        # would pick the empty candidate and we'd write a 0-byte file to disk.
+        candidates = [c for c in candidates if c.file_content and len(c.file_content.strip()) > 50]
+
+        if not candidates:
+            logger.error(f"Stage {display_name} failed: all LLM providers returned empty output.")
+            print(f"❌ Stage {display_name} failed: all LLM providers returned empty output.")
+            return
 
         # 3. Score & Select
         # TODO: Objective Static Analysis Roadmap
