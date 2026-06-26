@@ -90,7 +90,7 @@ class V2Orchestrator:
                 logger.warning(f"Failed to init {name} client: {e}. Using Mock.")
                 self.generators.append(LLMGenerator(MockClient(name=f"Mock-{name}"), f"Mock-{name}"))
         
-    def run_pipeline(self, project_path: str, context: ProjectContext, environment: str = "dev", no_llm: bool = False, gitops: bool = False, gitops_repo: str = None, target_service: str = None, publisher=None, no_prompts: bool = False, no_heal: bool = False):
+    def run_pipeline(self, project_path: str, context: ProjectContext, environment: str = "dev", gitops: bool = False, gitops_repo: str = None, target_service: str = None, publisher=None, no_prompts: bool = False, no_heal: bool = False):
         """
         Main entry point for V2 Pipeline.
         """
@@ -232,7 +232,7 @@ class V2Orchestrator:
                 for svc in services:
                     try:
                         svc_ctx = per_service_contexts[svc]
-                        res_files = self._execute_stage(f"{stage.replace('_', ' ')} ({svc})", stage, project_path, svc_ctx, plan, environment=environment, no_llm=no_llm, service_name=svc, no_prompts=no_prompts, no_heal=no_heal)
+                        res_files = self._execute_stage(f"{stage.replace('_', ' ')} ({svc})", stage, project_path, svc_ctx, plan, environment=environment, service_name=svc, no_prompts=no_prompts, no_heal=no_heal)
                         if res_files:
                             for f in res_files:
                                 all_artifacts[f.path] = f.content
@@ -249,13 +249,14 @@ class V2Orchestrator:
                                 resource_map[svc] = svc_ctx.resources
                         setattr(context, "resource_profiles", resource_map)
                         
-                    res_files = self._execute_stage(stage.replace("_", " "), stage, project_path, context, plan, environment=environment, no_llm=no_llm, no_prompts=no_prompts, no_heal=no_heal)
+                    res_files = self._execute_stage(stage.replace("_", " "), stage, project_path, context, plan, environment=environment, no_prompts=no_prompts, no_heal=no_heal)
                     if res_files:
                         for f in res_files:
                             all_artifacts[f.path] = f.content
                 except Exception as stage_e:
                     logger.error("Stage %s failed: %s", stage, stage_e)
-                    print(f"⚠️  Stage {stage} failed due to LLM exhaustion. Generating minimal fallback...")
+                    logger.warning("LLM EXHAUSTION FALLBACK for stage %s — output is a placeholder only; manual generation required.", stage)
+                    print(f"⚠️  LLM EXHAUSTION FALLBACK: Stage {stage} failed. Output is a placeholder — manual generation required.")
                     if stage == "kubernetes":
                          all_artifacts["k8s/fallback.yaml"] = "# Fallback Kubernetes Manifest\n# Manual generation required."
                     elif stage == "cicd":
@@ -299,7 +300,7 @@ class V2Orchestrator:
         return
 
         
-    def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan, environment: str = "dev", no_llm: bool = False, service_name: str = None, no_prompts: bool = False, no_heal: bool = False):
+    def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan, environment: str = "dev", service_name: str = None, no_prompts: bool = False, no_heal: bool = False):
         print(f"\n--- Stage: {display_name} ---")
         
         # 1. Load Prompts
@@ -413,60 +414,13 @@ class V2Orchestrator:
 
         
         candidates = []
-        if no_llm:
-            print(f"  [!] no-llm mode enabled. Generating artifacts for {stage_key}.")
-            from src.engine.language_detector import LanguageDetector
-            from src.engine.artifact_generator import ArtifactGenerator
-            from dataclasses import dataclass, field
-
-            detector = LanguageDetector()
-            generator = ArtifactGenerator()
-
-            # Detect stack for this service
-            svc_path = os.path.join(project_path, service_name) if service_name else project_path
-            stack = detector.detect(svc_path)
-
-            # Generate artifact based on stage_key
-            content = ""
-            if stage_key == "dockerfile":
-                content = generator.generate_dockerfile(stack, service_name or "app")
-            elif stage_key == "docker_compose":
-                # Detect all service stacks
-                stacks = []
-                for svc_dir in getattr(context, "microservice_dirs", []):
-                    stacks.append(detector.detect(os.path.join(project_path, svc_dir)))
-                if not stacks:
-                    stacks = [stack]
-                content = generator.generate_docker_compose(stacks, project_name=getattr(context, "project_name", "app"))
-            elif stage_key == "kubernetes":
-                content = "\n---\n".join(generator.generate_k8s_manifests(stack, service_name or "app").values())
-            elif stage_key in ("github_actions", "cicd"):
-                content = generator.generate_ci(stack, service_name or "app")
-            else:
-                # Fallback for unknown stages
-                content = f"# No-LLM fallback for {stage_key}\n# Detected stack: {stack.language}/{stack.framework}\n"
-
-            # Mock a candidate (kept inline exactly as before)
-            @dataclass
-            class MockCandidate:
-                file_content: str
-                model_name: str = "Fallback-Template"
-                reasoning: str = "Hardware-locked deterministic fallback"
-                security_score: int = 50
-                compliance_score: int = 50
-                best_practice_score: int = 60
-                complexity_score: int = 30
-                performance_score: int = 60
-                violations: list = field(default_factory=list)
-            candidates.append(MockCandidate(file_content=content))
-        else:
-            # Sequential execution — Ollama processes requests one at a time;
-            # parallel calls just queue up and timeout on 8 GB RAM machines.
-            for g in self.generators:
-                try:
-                    candidates.append(g.generate(template, prompt_context, task_type=stage_key))
-                except Exception as e:
-                    logger.error(f"Generator failed: {e}")
+        # Sequential execution — Ollama processes requests one at a time;
+        # parallel calls just queue up and timeout on 8 GB RAM machines.
+        for g in self.generators:
+            try:
+                candidates.append(g.generate(template, prompt_context, task_type=stage_key))
+            except Exception as e:
+                logger.error(f"Generator failed: {e}")
 
         # 3. Score & Select
         # TODO: Objective Static Analysis Roadmap

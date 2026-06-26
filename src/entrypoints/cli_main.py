@@ -171,7 +171,6 @@ def run_cli(args):
                 project_path,
                 context,
                 environment=args.env,
-                no_llm=args.no_llm,
                 gitops=args.gitops,
                 gitops_repo=gitops_repo_url or args.gitops_repo,
                 target_service=args.service,

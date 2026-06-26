@@ -100,10 +100,10 @@ graph TD
 ### CLI Mode — generate infra from a local project
 
 ```bash
-python main.py --no-prompts --no-heal --no-llm /path/to/project
+python main.py --no-prompts --no-heal /path/to/project
 ```
 
-Runs the multi-agent pipeline deterministically (no LLM, no interactive prompts, no auto-heal) and writes artefacts under `outputs/`.
+Runs the multi-agent pipeline deterministically (no interactive prompts, no auto-heal) and writes artefacts under `outputs/`.
 
 ### Server Mode — run the SaaS API
 

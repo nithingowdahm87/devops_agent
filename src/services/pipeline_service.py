@@ -65,8 +65,6 @@ class PipelineService:
                 run_id = set_correlation_id()
 
                 # Set env vars from config
-                if config.get("no_llm"):
-                    os.environ["LLM_PROVIDER_MODE"] = "no-llm"
                 if config.get("gitops"):
                     os.environ["LLM_PROVIDER_MODE"] = "gitops"
                 if config.get("service"):
@@ -88,7 +86,6 @@ class PipelineService:
                     project_path=project_path,
                     context=context,
                     environment=config.get("environment", "dev"),
-                    no_llm=config.get("no_llm", False),
                     gitops=config.get("gitops", False),
                     gitops_repo=config.get("gitops_repo"),
                     target_service=config.get("service"),

@@ -20,7 +20,6 @@ def main():
                         help="Run mode")
     parser.add_argument("--env", type=str, default="dev", help="Environment")
     parser.add_argument("--strict", action="store_true", help="Enable strict policy mode")
-    parser.add_argument("--no-llm", action="store_true", help="Force deterministic fallback mode")
     parser.add_argument("--gitops", action="store_true", help="Enable GitOps mode")
     parser.add_argument("--gitops-repo", type=str, help="GitOps repository URL or path")
     parser.add_argument("--service", type=str, help="Target a specific microservice only")
