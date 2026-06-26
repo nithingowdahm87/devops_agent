@@ -48,7 +48,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING=utf-8 \
     PATH="/opt/venv/bin:$PATH" \
-    APP_VERSION=${APP_VERSION}
+    APP_VERSION=${APP_VERSION} \
+    ENVIRONMENT=production
 
 # Non-root user
 RUN groupadd -r -g 10001 appgroup \
@@ -67,6 +68,9 @@ COPY --chown=appuser:appgroup configs/ ./configs/
 COPY --chown=appuser:appgroup policies/ ./policies/
 COPY --chown=appuser:appgroup README.md ./
 COPY --chown=appuser:appgroup LICENSE ./
+
+# Ensure app directory and .cache are writable by the non-root user
+RUN mkdir -p /app/.cache && chown -R appuser:appgroup /app
 
 # OCI Labels
 LABEL org.opencontainers.image.title="devops-agent" \
