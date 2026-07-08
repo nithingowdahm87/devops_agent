@@ -1,4 +1,4 @@
-"""Pydantic Settings for SaaS mode."""
+"""Pydantic Settings for CLI-only DevOps Agent."""
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
@@ -6,32 +6,35 @@ from pydantic import Field
 class Settings(BaseSettings):
     APP_NAME: str = "DevOps Agent"
     APP_VERSION: str = "1.0.0"
-    ENVIRONMENT: str = Field(default="development")
+    ENVIRONMENT: str = Field(default="production")
 
-    SERVER_HOST: str = Field(default="0.0.0.0")
-    SERVER_PORT: int = Field(default=8000)
+    # NVIDIA LLM
+    NVIDIA_API_KEY: str | None = Field(default=None)
+    NVIDIA_MODEL: str = Field(default="meta/llama-3.1-405b-instruct")
 
-    DATABASE_URL: str = Field(default="sqlite:///./devops_agent.db")
+    # Generation params
+    LLM_TEMPERATURE: float = Field(default=0.1)
+    LLM_MAX_TOKENS: int = Field(default=8192)
+    LLM_TIMEOUT_SECONDS: int = Field(default=180)
+    LLM_MAX_RETRIES: int = Field(default=3)
 
-    JWT_SECRET_KEY: str = Field(default="dev-secret-change-in-production")
-    JWT_ALGORITHM: str = Field(default="HS256")
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=60)
+    # Pipeline
+    PIPELINE_ENV: str = Field(default="prod")
 
-    MAX_REQUEST_BODY_SIZE_MB: int = Field(default=10)
-
-    KIMCHI_API_KEY: str | None = Field(default=None)
-    KIMCHI_API_URL: str = Field(default="https://llm.kimchi.dev/openai/v1")
-
-    RATE_LIMIT_DEFAULT: str = Field(default="100/minute")
-    RATE_LIMIT_WRITE: str = Field(default="20/minute")
-    REDIS_URL: str | None = Field(default=None)
-    SENTRY_DSN: str | None = Field(default=None)
-
-    # CORS: comma-separated list of allowed origins. Production should restrict this.
-    CORS_ALLOWED_ORIGINS: str = Field(default="http://localhost:3000,http://localhost:5173")
+    # Logging
     LOG_JSON: bool = Field(default=False)
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
 
 settings = Settings()
+
+
+def validate_cli_settings():
+    """Validate settings for CLI mode."""
+    if settings.ENVIRONMENT == "production":
+        if not settings.NVIDIA_API_KEY:
+            raise RuntimeError(
+                "NVIDIA_API_KEY is required for production use. "
+                "Set it in your environment or .env file."
+            )

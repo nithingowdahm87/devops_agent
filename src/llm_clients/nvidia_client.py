@@ -1,42 +1,36 @@
+"""
+NVIDIA LLM Client — Wrapper for DevOps Agent.
+
+Configure via env vars:
+  NVIDIA_API_KEY=your_key_here
+  NVIDIA_MODEL=meta/llama-3.1-405b-instruct (optional)
+"""
+
+from __future__ import annotations
 import os
-import requests
-from src.utils.secrets import get_secret
-from tenacity import retry, stop_after_attempt, wait_exponential
+from src.engine.llm import call_llm
+
 
 class NvidiaClient:
-    """LLM Client for NVIDIA NIM (OpenAI-compatible)."""
-    
-    def __init__(self, model: str = "meta/llama-3.1-405b-instruct", temperature: float = 0.2):
-        self.api_key = get_secret("NVIDIA_API_KEY")
+    """Thin wrapper around call_llm for compatibility with LLMGenerator."""
+
+    def __init__(self, model: str = "meta/llama-3.1-405b-instruct", temperature: float = 0.1):
         self.model = model
         self.temperature = temperature
-        self.base_url = "https://integrate.api.nvidia.com/v1/chat/completions"
+        # Validate API key exists
+        api_key = os.environ.get("NVIDIA_API_KEY")
+        if not api_key:
+            raise RuntimeError("NVIDIA_API_KEY not set. Configure NVIDIA API key to use the agent.")
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=5, max=20))
     def call(self, prompt: str) -> str:
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        data = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": "You are an elite DevOps Engineering Assistant."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": self.temperature,
-            "max_tokens": 4096,
-            "top_p": 0.7
-        }
-        
-        try:
-            resp = requests.post(self.base_url, headers=headers, json=data, timeout=120)
-            
-            if resp.status_code != 200:
-                print(f"  [!] NVIDIA API Error: {resp.status_code} - {resp.text}")
-            
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
-        except Exception as e:
-            print(f"  [!] NVIDIA Call Failed: {e}")
-            raise e
+        """Call NVIDIA LLM via the unified call_llm function."""
+        # The prompt here is the full prompt (system + user combined)
+        # call_llm expects system_prompt and user_prompt separately
+        # For compatibility, we treat the whole prompt as user_prompt
+        # and use a minimal system prompt
+        return call_llm(
+            system_prompt="You are an elite DevOps Engineering Assistant.",
+            user_prompt=prompt,
+            task_type="default",
+            max_tokens_budget=8192,
+        )
