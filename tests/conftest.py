@@ -1,65 +1,26 @@
-"""Shared pytest fixtures for devops-agent tests."""
+"""Shared pytest fixtures for devops-agent tests (CLI-only)."""
 
 import os
 import json
 import tempfile
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from src.api.main import app
-from src.db.database import Base, get_db
-
-# Ensure all models are registered with Base.metadata before create_all
-from src.db import models  # noqa: F401
-
-
-# FastAPI test DB setup (shared across all API test modules)
-_SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-_engine = create_engine(_SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
-_TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
-
-
-def _override_get_db():
-    db = _TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-app.dependency_overrides[get_db] = _override_get_db
-
-# Monkeypatch production SessionLocal so background tasks use test DB too
-from src.db import database as _db_module
-_db_module.SessionLocal = _TestingSessionLocal
-
-
-@pytest.fixture(autouse=True)
-def _setup_db():
-    Base.metadata.create_all(bind=_engine)
-    yield
-    Base.metadata.drop_all(bind=_engine)
-
-
-@pytest.fixture
-def client():
-    from fastapi.testclient import TestClient
-    return TestClient(app)
+# Test fixtures only - no FastAPI/SQLAlchemy dependencies needed for CLI tool
 
 
 @pytest.fixture
 def mock_env(monkeypatch):
-    """Set mock API keys so secrets module doesn't raise."""
-    monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
-    monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
+    """Set mock API keys so NVIDIA client doesn't raise."""
     monkeypatch.setenv("NVIDIA_API_KEY", "test-nvidia-key")
+    monkeypatch.setenv("NVIDIA_MODEL", "meta/llama-3.1-405b-instruct")
+    monkeypatch.setenv("PIPELINE_ENV", "dev")
+    monkeypatch.setenv("LOG_JSON", "false")
 
 
 @pytest.fixture
 def clean_env(monkeypatch):
     """Remove all API keys to test missing-key paths."""
-    for key in ["GOOGLE_API_KEY", "GROQ_API_KEY", "NVIDIA_API_KEY", "GITHUB_TOKEN", "GITHUB_REPO"]:
+    for key in ["NVIDIA_API_KEY", "NVIDIA_MODEL"]:
         monkeypatch.delenv(key, raising=False)
 
 
@@ -92,3 +53,138 @@ def mock_context():
         "ports": ["3000"],
         "env_vars": ["MONGO_URI"],
     }
+
+
+@pytest.fixture
+def sample_dockerfile():
+    """Valid multi-stage Dockerfile for testing."""
+    return '''FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --ignore-scripts && npm cache clean --force
+
+FROM node:20-alpine AS runtime
+RUN addgroup -g 10001 -S appgroup && adduser -u 10001 -S appuser -G appgroup
+WORKDIR /app
+COPY --from=builder --chown=root:root /app/node_modules ./node_modules
+COPY --from=builder --chown=root:root /app/dist ./dist
+USER appuser
+ENV NODE_ENV=production
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD node -e "require('http').get('http://localhost:3000/health',(r)=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"
+CMD ["node", "dist/index.js"]'''
+
+
+@pytest.fixture
+def sample_k8s_manifest():
+    """Valid K8s deployment manifest for testing."""
+    return '''apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-app
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: test-app
+  template:
+    metadata:
+      labels:
+        app: test-app
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: test-app
+        image: test-app:latest
+        ports:
+        - containerPort: 3000
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          periodSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 3000
+          periodSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: var-run
+          mountPath: /var/run
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: var-run
+        emptyDir: {}'''
+
+
+@pytest.fixture
+def sample_github_actions():
+    """Valid GitHub Actions workflow for testing."""
+    return '''name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+  id-token: write
+  security-events: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci && npm run build
+
+  trivy-fs:
+    runs-on: ubuntu-latest
+    needs: [compile]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-fs.sarif'''

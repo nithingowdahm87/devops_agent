@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: devops-agent
-  labels:
-    name: devops-agent
-    app: devops-agent
-    version: "1.0.0"
-    cost.allocation: devops-agent

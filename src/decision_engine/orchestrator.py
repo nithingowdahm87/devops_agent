@@ -20,10 +20,7 @@ from src.utils.prompt_loader import load_prompt
 from src.memory.long_term_memory import LongTermMemory
 
 # Clients
-from src.llm_clients.gemini_client import GeminiClient
 from src.llm_clients.nvidia_client import NvidiaClient
-from src.llm_clients.groq_client import GroqClient
-from src.llm_clients.kimchi_client import KimchiClient
 from src.llm_clients.mock_client import MockClient
 
 # Engine
@@ -56,39 +53,35 @@ class V2Orchestrator:
         self._init_generators()
         
     def _init_generators(self):
-        """Try to init real clients, fallback to mock.
+        """Initialize NVIDIA client only. Fail fast if not configured.
 
-        Respects LLM_PRIMARY env var — only initializes the primary provider
-        (plus mocks as silent fallbacks) to avoid redundant API calls.
+        Respects LLM_PRIMARY env var — only initializes the primary provider.
+        If the primary provider fails to initialize (missing API key, etc.), we DO NOT
+        silently fall back to MockClient. Instead, we log a prominent error and raise,
+        because generating mock infrastructure is dangerous and misleading.
         """
-        all_clients = {
-            "gemini":  ("Gemini", GeminiClient),
-            "groq":    ("Groq", GroqClient),
-            "nvidia":  ("NVIDIA", NvidiaClient),
-            "kimchi":  ("Kimchi", KimchiClient),
-            "cerebras":("Cerebras", None),  # imported on demand if needed
-            "openrouter":("OpenRouter", None),
-        }
         primary = os.environ.get("LLM_PRIMARY", "").lower()
-        if primary not in all_clients:
-            primary = "groq"
+        if primary != "nvidia":
+            raise RuntimeError(f"Only NVIDIA provider is supported. Got LLM_PRIMARY={primary}")
 
-        # Always init primary; only init others if explicitly configured for multi-provider
-        order = [all_clients[primary]]
-        if os.environ.get("LLM_MULTI_PROVIDER", "").lower() == "true":
-            for k, v in all_clients.items():
-                if k != primary and v[1] is not None:
-                    order.append(v)
-
-        for name, cls in order:
-            if cls is None:
-                continue
-            try:
-                client = cls()
-                self.generators.append(LLMGenerator(client, name))
-            except Exception as e:
-                logger.warning(f"Failed to init {name} client: {e}. Using Mock.")
-                self.generators.append(LLMGenerator(MockClient(name=f"Mock-{name}"), f"Mock-{name}"))
+        try:
+            client = NvidiaClient()
+            self.generators.append(LLMGenerator(client, "NVIDIA"))
+            logger.info("Initialized NVIDIA LLM provider")
+        except Exception as e:
+            error_msg = (
+                "\n❌ ═════════════════════════════════════════════════════════════\n"
+                "❌  NVIDIA LLM PROVIDER NOT CONFIGURED — ABORTING        ═\n"
+                "═══════════════════════════════════════════════════════════════\n"
+                "The pipeline requires a real NVIDIA LLM backend.\n\n"
+                "To fix, set:\n"
+                "  export NVIDIA_API_KEY=your_key_here\n\n"
+                "Current LLM_PRIMARY: " + os.environ.get("LLM_PRIMARY", "(unset)") + "\n"
+                "═══════════════════════════════════════════════════════════════\n"
+            )
+            logger.critical(error_msg)
+            print(error_msg)
+            raise RuntimeError("NVIDIA LLM provider not available. Configure NVIDIA_API_KEY.")
         
     def run_pipeline(self, project_path: str, context: ProjectContext, environment: str = "dev", gitops: bool = False, gitops_repo: str = None, target_service: str = None, publisher=None, no_prompts: bool = False, no_heal: bool = False):
         """
@@ -802,7 +795,7 @@ class V2Orchestrator:
         ctx.frameworks = svc_detail.get("frameworks", [])
         
         # Add a custom 'metadata' field for resource profiles
-        ctx.service_path = svc_detail.get("path", service_name)   # ensure code_analysis_agent fills 'path'
+        ctx.service_path = svc_detail.get("path", service_name)   # ensure analysis fills 'path'
         ctx.resources = profile
         
         # TRUNCATE to ~12000 chars to avoid llama.cpp context overflow!

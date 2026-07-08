@@ -1,4 +1,4 @@
-from src.agents.code_analysis_agent import CodeAnalysisAgent
+from src.analysis.code_analysis_agent import CodeAnalysisAgent
 from src.schemas import ProjectContext
 import os
 

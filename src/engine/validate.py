@@ -121,13 +121,13 @@ class Validator:
                 if not doc: continue
                 schema_name = None
                 kind = doc.get("kind")
-                
+
                 # Check path & kind for ArgoCD
                 if kind == "ApplicationSet" or "argocd/applicationset.yaml" in file.path.lower():
                     schema_name = "argocd-appset.schema.json"
                 elif kind == "Application":
                     schema_name = "argocd-app.schema.json"
-                
+
                 if schema_name:
                     schema_path = os.path.join(self.project_root, "configs", "schemas", schema_name)
                     if os.path.exists(schema_path):

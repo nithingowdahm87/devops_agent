@@ -45,13 +45,10 @@ def _fetch_rag_snippet(task_type: str, context: Dict[str, Any]) -> str:
     safe to embed in the prompt.
     """
     try:
-        from src.engine.rag import get_rag_context, RAGStore
-        store = RAGStore()
-        if not store.collection or store.collection.count() == 0:
-            return ""   # nothing seeded yet, skip silently
+        from src.engine.rag import get_rag_context
 
         artifact_type = _artifact_type(task_type)
-        lang  = context.get("language") or context.get("runtime") or "generic"
+        lang = context.get("language") or context.get("runtime") or "generic"
         stack = context.get("frameworks") or context.get("deps") or ""
         query = f"Best practices for {artifact_type} with {lang} service and stack {stack}"
 

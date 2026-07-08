@@ -1,124 +1,205 @@
-import os
+"""
+Thread-safe RAG (Retrieval-Augmented Generation) store using ChromaDB.
+
+Provides a singleton RAGStore with thread-safe operations for concurrent access.
+"""
+
+from __future__ import annotations
 import logging
-
-log = logging.getLogger(__name__)
-
-_CHROMADB_AVAILABLE = False
+import threading
+from typing import Optional
 
 try:
     import chromadb
     from chromadb.config import Settings
-    _CHROMADB_AVAILABLE = True
+    CHROMA_AVAILABLE = True
 except ImportError:
-    log.warning("chromadb not installed — RAG will use static fallback knowledge.")
+    CHROMA_AVAILABLE = False
+    chromadb = None
+
+log = logging.getLogger(__name__)
 
 
 class RAGStore:
-    _docker_seed = (
-        "Docker Best Practices 2026:\n"
-        "- Use multi-stage builds to minimize image size.\n"
-        "- Do not run containers as root; USER nonroot.\n"
-        "- Avoid :latest tags; pin strict SHA or explicit version.\n"
-        "- Order commands to leverage caching (COPY requirements first).\n"
-        "- No hardcoded secrets."
-    )
-    _k8s_seed = (
-        "Kubernetes Best Practices 2026:\n"
-        "- Always configure requests and limits for CPU and memory.\n"
-        "- Use readOnlyRootFilesystem where applicable.\n"
-        "- Set runAsNonRoot: true and allowPrivilegeEscalation: false.\n"
-        "- Define liveness and readiness probes.\n"
-        "- Use namespaces; never deploy to 'default' implicitly."
-    )
-    _ci_seed = (
-        "GitHub Actions CI/CD Best Practices 2026:\n"
-        "- Use granular permissions: `contents: read` at minimum.\n"
-        "- Pin actions to full commit SHA, not tags.\n"
-        "- Avoid passing secrets directly to run commands if possible, use environment variables bounding.\n"
-        "- Ensure workflow triggers are restricted (e.g., branches: [main])."
-    )
+    """
+    Thread-safe singleton RAG store using ChromaDB.
 
-    def __init__(self, db_path: str = ".chroma_db"):
-        self.db_path = db_path
-        self._client = None
+    Uses double-checked locking pattern for thread-safe singleton initialization.
+    All operations are protected by a reentrant lock for thread safety.
+    """
+
+    _instance: Optional['RAGStore'] = None
+    _lock = threading.RLock()
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        # Only initialize once
+        if hasattr(self, '_initialized'):
+            return
+
+        self._lock = threading.RLock()
         self._collection = None
-        if _CHROMADB_AVAILABLE:
-            self._init_chroma()
-
-    @property
-    def collection(self):
-        return self._collection
+        self._initialized = True
+        self._init_chroma()
 
     def _init_chroma(self):
+        """Initialize ChromaDB client and collection."""
+        if not CHROMA_AVAILABLE:
+            log.warning("ChromaDB not available - RAG disabled")
+            self._collection = None
+            return
+
         try:
-            if not os.path.exists(self.db_path):
-                os.makedirs(self.db_path)
+            # Use persistent client with local directory
             self._client = chromadb.PersistentClient(
-                path=self.db_path,
-                settings=Settings(allow_reset=True)
+                path=".chroma_db",
+                settings=Settings(anonymized_telemetry=False)
             )
             self._collection = self._client.get_or_create_collection(
-                name="devops_knowledge_base",
-                metadata={"hnsw:space": "cosine"}
+                name="devops_rag",
+                metadata={"description": "DevOps best practices RAG store"}
             )
+            log.info("RAG store initialized with ChromaDB")
         except Exception as e:
-            log.warning("Failed to init ChromaDB: %s — using static fallback.", e)
-            self._client = None
+            log.warning(f"Failed to initialize ChromaDB: {e}. RAG disabled.")
             self._collection = None
 
-    def add_knowledge(self, artifact_type: str, content: str, source: str = "innovation_layer"):
-        if not self._collection:
-            return
-        import hashlib
-        doc_id = hashlib.sha256(content.encode()).hexdigest()[:16]
-        self._collection.add(
-            documents=[content],
-            metadatas=[{"artifact_type": artifact_type, "source": source}],
-            ids=[f"{artifact_type}_{doc_id}"]
-        )
-        log.info("Added knowledge to RAG store for %s (%s)", artifact_type, source)
+    def add(self, content: str, metadata: dict, doc_id: str) -> bool:
+        """
+        Add a document to the RAG store.
 
-    def retrieve(self, query: str, artifact_type: str, k: int = 1) -> str:
-        if not self._collection:
-            return self._static_fallback(artifact_type)
-        try:
-            results = self._collection.query(
-                query_texts=[query],
-                n_results=k,
-                where={"artifact_type": artifact_type}
-            )
-            if not results["documents"] or not results["documents"][0]:
-                return self._static_fallback(artifact_type)
-            return "\n\n---\n\n".join(results["documents"][0])
-        except Exception as e:
-            log.warning("RAG query failed: %s — using static fallback.", e)
-            return self._static_fallback(artifact_type)
+        Args:
+            content: Document content
+            metadata: Document metadata
+            doc_id: Unique document ID
 
-    def _static_fallback(self, artifact_type: str) -> str:
-        return {
-            "docker": self._docker_seed,
-            "k8s": self._k8s_seed,
-            "ci": self._ci_seed,
-        }.get(artifact_type, "No specific best practices found. Follow general industry standards.")
-
-    def seed_initial_knowledge(self):
+        Returns:
+            True if added successfully, False otherwise
+        """
         if not self._collection:
-            return
-        count = self._collection.count()
-        if count > 0:
-            return
-        self.add_knowledge("docker", self._docker_seed, "initial_seed")
-        self.add_knowledge("k8s", self._k8s_seed, "initial_seed")
-        self.add_knowledge("ci", self._ci_seed, "initial_seed")
+            return False
+
+        with self._lock:
+            try:
+                self._collection.add(
+                    documents=[content],
+                    metadatas=[metadata],
+                    ids=[doc_id]
+                )
+                return True
+            except Exception as e:
+                log.warning(f"Failed to add document to RAG store: {e}")
+                return False
+
+    def query(self, query: str, artifact_type: str, n_results: int = 3) -> str:
+        """
+        Query the RAG store for relevant snippets.
+
+        Args:
+            query: Query string
+            artifact_type: Type of artifact (docker, k8s, ci)
+            n_results: Maximum number of results
+
+        Returns:
+            Concatenated snippets or empty string if none found
+        """
+        if not self._collection:
+            return ""
+
+        with self._lock:
+            try:
+                results = self._collection.query(
+                    query_texts=[query],
+                    n_results=n_results,
+                    where={"artifact_type": artifact_type} if artifact_type else None
+                )
+
+                if not results or not results.get('documents') or not results['documents'][0]:
+                    return ""
+
+                snippets = results['documents'][0]
+                # Cap total response size
+                total = "\n\n".join(snippets)
+                return total[:1200] if len(total) > 1200 else total
+
+            except Exception as e:
+                log.warning(f"RAG query failed: {e}")
+                return ""
+
+    def get_count(self) -> int:
+        """Get the number of documents in the store."""
+        if not self._collection:
+            return 0
+        with self._lock:
+            try:
+                return self._collection.count()
+            except Exception:
+                return 0
+
+    def is_ready(self) -> bool:
+        """Check if the RAG store is initialized and ready."""
+        return self._collection is not None
+
+
+# Global singleton instance
+_rag_store: Optional[RAGStore] = None
+_rag_lock = threading.Lock()
+
+
+def get_rag_store() -> RAGStore:
+    """Get the global RAG store singleton."""
+    global _rag_store
+    if _rag_store is None:
+        with _rag_lock:
+            if _rag_store is None:
+                _rag_store = RAGStore()
+    return _rag_store
 
 
 def get_rag_context(query: str, artifact_type: str) -> str:
-    store = RAGStore()
-    store.seed_initial_knowledge()
-    return store.retrieve(query, artifact_type)
+    """
+    Get RAG context for a query.
+
+    Args:
+        query: Query string
+        artifact_type: Type of artifact (docker, k8s, ci)
+
+    Returns:
+        Relevant context snippets or empty string
+    """
+    store = get_rag_store()
+    if not store.is_ready():
+        return ""
+    return store.query(query, artifact_type)
 
 
-def save_to_rag(artifact_type: str, content: str, source: str = "innovation_layer"):
-    store = RAGStore()
-    store.add_knowledge(artifact_type, content, source)
+def save_to_rag(artifact_type: str, content: str, source: str) -> bool:
+    """
+    Save content to RAG store.
 
+    Args:
+        artifact_type: Type of artifact (docker, k8s, ci)
+        content: Content to save
+        source: Source identifier
+
+    Returns:
+        True if saved successfully
+    """
+    store = get_rag_store()
+    if not store.is_ready():
+        return False
+
+    import hashlib
+    doc_id = hashlib.sha256(f"{artifact_type}:{content[:100]}".encode()).hexdigest()[:16]
+    metadata = {
+        "artifact_type": artifact_type,
+        "source": source,
+        "length": len(content)
+    }
+    return store.add(content, metadata, doc_id)
