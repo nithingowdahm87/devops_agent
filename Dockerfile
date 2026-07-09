@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # ============================================================
-# Production Dockerfile — DevOps Agent v2.0.0
+# Production Dockerfile — DevOps Agent v1.0.0 (CLI-only)
 # ============================================================
 ARG PYTHON_VERSION=3.12
 ARG GIT_SHA=""
@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml requirements.txt ./
 COPY src/ ./src/
 COPY configs/ ./configs/
-COPY main.py run_agent.sh ./
+COPY main.py ./
 
 # Create venv and install deps with pip (needed for chroma-hnswlib compilation)
 RUN uv venv /opt/venv
@@ -62,19 +62,15 @@ COPY --from=builder /opt/venv /opt/venv
 
 # Copy application files
 COPY --chown=appuser:appgroup main.py ./
-COPY --chown=appuser:appgroup run_agent.sh ./
 COPY --chown=appuser:appgroup src/ ./src/
 COPY --chown=appuser:appgroup configs/ ./configs/
-COPY --chown=appuser:appgroup policies/ ./policies/
-COPY --chown=appuser:appgroup README.md ./
-COPY --chown=appuser:appgroup LICENSE ./
 
 # Ensure app directory and .cache are writable by the non-root user
 RUN mkdir -p /app/.cache && chown -R appuser:appgroup /app
 
 # OCI Labels
 LABEL org.opencontainers.image.title="devops-agent" \
-      org.opencontainers.image.description="AI-powered multi-agent DevOps pipeline" \
+      org.opencontainers.image.description="AI-powered DevOps file generation tool (NVIDIA CLI)" \
       org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
@@ -84,4 +80,4 @@ USER appuser
 
 # The agent requires a project path as argument
 ENTRYPOINT ["python3", "main.py"]
-CMD ["--mode", "server", "--port", "8000"]
+CMD ["--help"]

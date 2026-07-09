@@ -1,14 +1,13 @@
-# 🚀 DevOps Agent — Multi-Agent DevOps Automation Platform
+# 🚀 DevOps Agent — AI-Powered Infrastructure Generation CLI
 
 ![Project Status](https://img.shields.io/badge/status-stable-green)
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
-![FastAPI](https://img.shields.io/badge/fastapi-0.100+-green.svg)
-![SQLAlchemy](https://img.shields.io/badge/sqlalchemy-2.0+-orange.svg)
-![Tests](https://img.shields.io/badge/tests-108%20passing-brightgreen.svg)
+![NVIDIA Only](https://img.shields.io/badge/LLM-NVIDIA%20Only-purple.svg)
+![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)
 ![License MIT](https://img.shields.io/badge/license-MIT-yellow.svg)
 
-AI-powered multi-agent DevOps pipeline that generates production-grade infrastructure (Docker, Kubernetes, CI/CD, GitOps PRs) from any codebase — with policy validation, cost estimation, and an OODA-loop self-healer.
+**CLI-only DevOps tool that generates production-grade infrastructure (Docker, Kubernetes, CI/CD) from any codebase using NVIDIA LLM — with policy validation, local artifact generation, and secure file handling.**
 
 ## Table of Contents
 
@@ -17,8 +16,6 @@ AI-powered multi-agent DevOps pipeline that generates production-grade infrastru
 - [🚀 Quick Start](#-quick-start)
 - [📦 Installation](#-installation)
 - [⚙️ Configuration](#️-configuration)
-- [🔐 Authentication](#-authentication)
-- [📊 Observability](#-observability)
 - [🧪 Testing](#-testing)
 - [☸️ Deployment](#️-deployment)
 - [📁 Project Structure](#-project-structure)
@@ -28,304 +25,262 @@ AI-powered multi-agent DevOps pipeline that generates production-grade infrastru
 
 ## 🏗️ Architecture
 
-![Architecture Diagram](docs/architecture.png)
-
-```mermaid
-graph TD
-    A[Clients<br/>Web UI / CLI / HTTP] -->|REST API| B(FastAPI Server)
-    B --> C[Auth Router]
-    B --> D[Projects Router]
-    B --> E[Runs Router]
-    B --> F[Video Router]
-    B --> G[Agents Router]
-    B --> H[Evaluation Router]
-    B --> I[Admin Router]
-    C --> J[(SQLite / PostgreSQL)]
-    D --> J
-    E --> J
-    F --> J
-    G --> J
-    H --> J
-    I --> J
-    E --> K[Pipeline Background Tasks]
-    F --> L[Video Generation API]
-    G --> M[CLI Agent Workers]
-    H --> N[Cohen's Kappa Engine]
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        CLI Entry Point                          │
+│                         main.py                                  │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      V2 Orchestrator                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │   Planner   │──│  Generator  │──│  Evaluator  │             │
+│  │ (Architecture│  │  (NVIDIA    │  │ (Linters +  │             │
+│  │  Planner)   │  │   LLM)      │  │   Heuristics)            │
+│  └─────────────┘  └─────────────┘  └─────────────┘             │
+│         │               │               │                        │
+│         ▼               ▼               ▼                        │
+│  ┌─────────────────────────────────────────────┐               │
+│  │           Validator / Healer                │               │
+│  │   hadolint │ kubeconform │ trivy │ checkov  │               │
+│  └─────────────────────────────────────────────┘               │
+│         │               │               │                        │
+│         ▼               ▼               ▼                        │
+│  ┌─────────────────────────────────────────────┐               │
+│  │          Artifact Manager                   │               │
+│  │   Write Gate + Quarantine + Idempotency     │               │
+│  └─────────────────────────────────────────────┘               │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Clients                                 │
-│              Web UI / CLI / HTTP API                        │
-└─────────────────────────┬───────────────────────────────────┘
-                          │ REST API
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│              FastAPI Application                            │
-│  Auth ── Projects ── Runs ── Video ── Agents ── Eval ── Admin│
-└─────────────────────────┬───────────────────────────────────┘
-                          │ SQLAlchemy ORM
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│            SQLite / PostgreSQL Database                     │
-└─────────────────────────────────────────────────────────────┘
-```
+**Key Design Principles:**
+- **Single Provider**: NVIDIA LLM only — no multi-provider routing complexity
+- **CLI-Only**: No server/API mode — runs as a local tool
+- **Local Writes Only**: No GitOps PR publishing — outputs go to `outputs/` directory
+- **Fail-Fast**: Missing NVIDIA credentials = immediate error, no mock fallback
+- **Security First**: Sandboxed prompt rendering, path validation, no shell execution
 
 ## ✨ Features
 
-### Core Engine
-- 🔍 **Code Analysis** — Detects language, framework, and database stack (MongoDB, Postgres, Redis, etc.) from any project
-- 🐳 **Docker Generation** — Production-grade multi-stage Dockerfiles
-- ☸️ **Kubernetes Manifests** — Full K8s resources: Deployment, Service, ConfigMap, Secret, Ingress, NetworkPolicy
-- 🔁 **CI/CD Pipelines** — Generated GitHub Actions workflows
-- 🛡️ **Policy Validation** — Built-in policy engine validates generated artefacts against `policies/`
-- 🔄 **GitOps PRs** — Opens pull requests directly to a GitOps repository
-- 💰 **Cost Estimation** — Calculates monthly infrastructure cost for generated stacks
-- 🩹 **OODA Self-Healer** — Observe/Orient/Decide/Act loop for debugging and retrying failing steps
+### Core Generation
+- 🔍 **Code Analysis** — Detects language, framework, database stack (Postgres, Redis, MongoDB, etc.) from any project
+- 🐳 **Docker Generation** — Production-grade multi-stage Dockerfiles with non-root user, health checks, OCI labels
+- ☸️ **Kubernetes Manifests** — Full K8s resources: Deployment, Service, HPA, PDB, NetworkPolicy, Namespace
+- 🔁 **CI/CD Pipelines** — Generated GitHub Actions workflows with matrix strategy, security scanning, SARIF upload
 
-### SaaS / API
-- 🔑 **API Key Authentication** — SHA-256 hashed, scoped, expiring service-to-service keys
-- 🪙 **JWT Authentication** — Bearer token login with user management
-- 🗄️ **Alembic Migrations** — Versioned, reversible schema evolution
-- 🪵 **Audit Logging** — Every CREATE / UPDATE / DELETE captured in `audit_logs`
-- 🗑️ **Soft Deletes** — Records marked `deleted_at`, fully recoverable
-- 🚦 **Rate limiting** — Per-IP limits (100/min reads, 20/min writes)
-- 🛡️ **Security Headers** — HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy
-- 📈 **Prometheus Metrics** — `/metrics` endpoint for scraping
-- 🩺 **Health Checks** — `/health`, `/ready`, and deep `/health/deep` (DB + Redis + external APIs)
-- ⚡ **Circuit Breakers & Timeouts** — External API calls fail fast after 5 consecutive errors
+### Validation & Quality
+- 🛡️ **Policy Engine** — Environment-aware validation (prod vs dev rules)
+- 🔧 **Auto-Healer** — LLM-based fix loop for validation failures
+- 📏 **Linter Integration** — Real `hadolint`, `kubeconform`, `yamllint`, `trivy`, `checkov` via subprocess
+- ⚖️ **Hybrid Scoring** — Linter scores (50%) + Heuristics (30%) + LLM Judge (20%, optional)
+- 🔒 **Idempotency** — Deterministic YAML/Dockerfile/JSON output normalization
+
+### Security & Safety
+- 🚫 **No Shell Execution** — Removed arbitrary command execution capability
+- 🛡️ **Prompt Injection Defense** — Jinja2 sandboxed template rendering with allowlisted variables
+- 📁 **Path Traversal Protection** — All file writes validated against project root
+- 🗂️ **Quarantine System** — Failed artifacts isolated in `.artifacts_history/` with metadata
+- ⚡ **Fail-Fast Config** — Missing NVIDIA_API_KEY = immediate error, no silent mock fallback
 
 ## 🚀 Quick Start
 
-### CLI Mode — generate infra from a local project
-
-```bash
-python main.py --no-prompts --no-heal /path/to/project
-```
-
-Runs the multi-agent pipeline deterministically (no interactive prompts, no auto-heal) and writes artefacts under `outputs/`.
-
-### Server Mode — run the SaaS API
-
-```bash
-python main.py --mode server --port 8000
-```
-
-FastAPI server available at `http://localhost:8000`. Interactive docs at `/api/docs`.
-
-### Docker
-
-```bash
-docker build -t devops-agent .
-docker run -p 8000:8000 devops-agent
-```
-
-The image runs as a non-root `appuser` and defaults to server mode on port 8000.
-
-### Docker Compose (full stack with PostgreSQL + Redis)
-
-```bash
-docker compose up -d
-```
-
-## 📦 Installation
-
 ### Prerequisites
-
 - **Python 3.10+** (Docker image targets 3.12)
+- **NVIDIA API Key** — Get one at https://build.nvidia.com
 - **Docker** (optional, for containerised runs)
-- **Git**
 
-### Local install
-
+### Local Install
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -e ".[test]"
 ```
 
-This installs the `devops-agent` console script plus the `test` extras (`pytest`, `pytest-cov`).
+### Configure NVIDIA API Key
+```bash
+cp .env.example .env
+# Edit .env and add your NVIDIA_API_KEY
+```
+
+### Generate Infrastructure
+```bash
+# Auto-pilot mode (no prompts, no heal)
+python main.py --no-prompts --no-heal /path/to/project
+
+# With healing enabled (default)
+python main.py --no-prompts /path/to/project
+
+# Target specific service in monorepo
+python main.py --no-prompts --service backend /path/to/project
+```
+
+Outputs are written to:
+- `outputs/per-service/<service>/` — Dockerfile, K8s manifests, CI workflows
+- `outputs/shared/` — docker-compose.yml, shared configs
+
+## 📦 Installation
+
+### Local Development
+```bash
+git clone https://github.com/nithingowdahm87/devops_agent
+cd devops_agent
+python3 -m venv venv
+source venv/bin/activate
+pip install -e ".[test]"
+```
+
+### Docker
+```bash
+docker build -t devops-agent .
+# Run against a project directory
+docker run -v /path/to/project:/project devops-agent --no-prompts --no-heal /project
+```
+
+### Makefile (Convenience)
+```bash
+make install       # Install dev dependencies
+make test          # Run test suite
+make lint          # Run linters
+make run PROJECT=/path/to/project  # Run agent
+```
 
 ## ⚙️ Configuration
 
-All settings are managed via [Pydantic Settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) and can be supplied through environment variables or a local `.env` file (auto-loaded from the project root).
+All settings via environment variables or `.env` file (auto-loaded from project root).
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `DATABASE_URL` | `sqlite:///./devops_agent.db` | SQLAlchemy database URL. Use `postgresql+psycopg://...` in production. |
-| `SERVER_HOST` | `0.0.0.0` | Bind host for the FastAPI server. |
-| `SERVER_PORT` | `8000` | Bind port for the FastAPI server. |
-| `ENVIRONMENT` | `development` | `development` runs auto-migrations on startup; `production` requires explicit migration. |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Comma-separated list of allowed CORS origins. |
-| `JWT_SECRET_KEY` | `dev-secret-change-in-production` | HMAC secret for signing JWTs — **must** be overridden in production. |
-| `GITHUB_TOKEN` | _(unset)_ | Personal access token used by the GitOps agent to open PRs. |
-| `LLM_PROVIDER_MODE` | `kimchi` | LLM backend: `local`, `kimchi`, or `remote`. Overridable via `--llm-mode`. |
-
-Additional knobs worth knowing: `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` (default 60), `MAX_REQUEST_BODY_SIZE_MB` (default 10), `RATE_LIMIT_DEFAULT` (`100/minute`), `RATE_LIMIT_WRITE` (`20/minute`), `REDIS_URL` (optional shared rate-limit store), `SENTRY_DSN` (optional error tracking), `LOG_JSON` (toggle structured JSON logs).
-
-## 🔐 Authentication
-
-### JWT (interactive users)
-
-```bash
-# Register
-curl -X POST http://localhost:8000/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"alice@test.com","password":"secret123"}'
-
-# Login → access_token
-curl -X POST http://localhost:8000/api/v1/auth/login \
-  -d "username=alice@test.com&password=secret123"
-
-# Use as Bearer
-curl http://localhost:8000/api/v1/projects/ \
-  -H "Authorization: Bearer <TOKEN>"
-```
-
-### API Keys (service-to-service)
-
-```bash
-# Mint a key (returned once)
-curl -X POST http://localhost:8000/api/v1/auth/api-keys/ \
-  -H "Authorization: Bearer <TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"ci-key"}'
-
-# Use the key directly — no JWT needed
-curl http://localhost:8000/api/v1/projects/ \
-  -H "X-API-Key: da_<your-key-here>"
-```
-
-Keys are SHA-256 hashed at rest, can be scoped, and may carry an expiry.
-
-### Rate Limiting
-
-- **Read endpoints** (`projects`, `runs`, `agents` listings): 100 requests / minute / IP.
-- **Write endpoints** (`auth`, and any state-changing call): 20 requests / minute / IP.
-- Optionally backed by Redis (`REDIS_URL`) for multi-instance deployments.
-- Returns `HTTP 429 Rate limit exceeded` when triggered.
-
-## 📊 Observability
-
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /metrics` | Prometheus exposition (request count, latency histograms, status codes). |
-| `GET /api/v1/admin/health` | Liveness probe. |
-| `GET /api/v1/admin/ready` | Readiness probe (DB ready). |
-| `GET /api/v1/admin/health/deep` | Deep health — DB, Redis, and external API latency diagnostics. |
-
-Logs go through [Loguru](https://github.com/Delgan/loguru) and can be switched to JSON via `LOG_JSON=true`.
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `NVIDIA_API_KEY` | **Yes** | — | NVIDIA NIM API key (get from build.nvidia.com) |
+| `NVIDIA_MODEL` | No | `meta/llama-3.1-405b-instruct` | NVIDIA model to use |
+| `LLM_TEMPERATURE` | No | `0.1` | Generation temperature (0.0-1.0) |
+| `LLM_MAX_TOKENS` | No | `8192` | Max tokens per request |
+| `LLM_TIMEOUT_SECONDS` | No | `180` | Request timeout |
+| `LLM_MAX_RETRIES` | No | No | `3` | Max retry attempts |
+| `LOG_JSON` | No | `false` | Structured JSON logging |
+| `ENVIRONMENT` | No | `dev` | `dev` or `prod` (affects policy strictness) |
 
 ## 🧪 Testing
 
 ```bash
-pytest tests/ -v
+# Run full test suite
+pytest tests/ -v --tb=short
+
+# Run specific test categories
+pytest tests/test_policy.py -v
+pytest tests/test_v2_modules.py -v
+pytest tests/test_idempotency.py -v
 ```
 
-The suite ships **108 passing tests** covering:
-
-- **API** — `test_api_auth.py`, `test_api_projects.py`, `test_api_runs.py`, `test_api_video.py`, `test_api_agents.py`, `test_api_evaluation.py`
-- **Engine** — `test_compiler_pipeline.py`, `test_v2_modules.py`, `test_exit_codes.py`, `test_idempotency.py`
-- **Policy** — `test_policy.py`, `test_policy_engine.py`, `test_integrity_audit.py`
-- **Tools** — `test_tools_file_ops.py`, `test_db_detection.py`, `test_sanitizer.py`, `test_secrets.py`
-- **K8s completeness** — `test_k8s_completeness.py`, `test_k8s_prompts.py`
-- **Cost, memory, OODA healer** — `test_cost_agent.py`, `test_memory.py`, `test_ooda_healer.py`
-
-For HTTP smoke tests against a live server, see `CONTRIBUTING.md`.
+The test suite covers:
+- **Core Logic** — `test_v2_modules.py`, `test_schemas.py`, `test_clean_markdown.py`
+- **Validation** — `test_idempotency.py`, `test_write_gate.py`, `test_policy.py`, `test_policy_engine.py`
+- **Safety** — `test_tools_file_ops.py` (path traversal), `test_sanitizer.py` (prompt injection)
+- **Engine** — `test_ooda_healer.py`, `test_memory.py`, `test_integrity_audit.py`
 
 ## ☸️ Deployment
 
-The project ships first-class deployment manifests for every common target. See [`docs/deploy.md`](docs/deploy.md) for the full guide.
-
-### Docker Compose (single host)
-
+### Docker Image
 ```bash
-docker compose up -d
+docker build -t devops-agent .
+docker run -v /host/project:/project devops-agent --no-prompts /project
 ```
 
-### Kubernetes (raw manifests)
-
-```bash
-kubectl apply -f k8s/
+### Kubernetes (Job/CronJob)
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: devops-agent
+spec:
+  schedule: "0 2 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: agent
+            image: devops-agent:latest
+            args: ["--no-prompts", "--no-heal", "/project"]
+            volumeMounts:
+            - name: project
+              mountPath: /project
+          volumes:
+          - name: project
+            persistentVolumeClaim:
+              claimName: project-pvc
+          restartPolicy: OnFailure
 ```
-
-Includes namespace, configmap, secret, deployment, service, ingress, and network policy.
-
-### Helm
-
-```bash
-helm install devops-agent ./helm/devops-agent --namespace devops-agent --create-namespace
-```
-
-### ArgoCD (GitOps)
-
-```bash
-kubectl apply -f argocd/application.yaml
-```
-
-Secrets should always be injected via Kubernetes Secrets or an external manager (Sealed Secrets, Vault). Never commit secrets to git.
 
 ## 📁 Project Structure
 
 ```
 devops_agent/
-├── main.py                       # CLI / server entry point
-├── run_agent.sh                  # Container entrypoint helper
+├── main.py                       # CLI entry point
+├── Makefile                      # Convenience targets
 ├── pyproject.toml                # Project metadata & deps
-├── requirements.txt
-├── alembic/                      # Database migrations
-├── alembic.ini
-├── docker-compose.yml            # Full local stack
-├── Dockerfile                    # Multi-stage production image
-├── docker-entrypoint.sh
-├── cli/                          # Legacy CLI scripts
+├── requirements.txt              # Pinned dependencies
+├── Dockerfile                    # Multi-stage CLI image
+├── .env.example                  # Configuration template
+├── configs/
+│   └── prompts/                  # Jinja2 prompt templates
+│       ├── docker/
+│       │   ├── docker_production.md
+│       │   └── docker_compose.md
+│       ├── k8s/
+│       │   └── k8s_production.md
+│       └── cicd/
+│           └── github_actions.md
 ├── src/
-│   ├── cli/                      # Interactive CLI logic
-│   ├── entrypoints/              # cli_main.py / server_main.py
-│   ├── api/                      # FastAPI app, routers, middleware
-│   │   └── routers/              # auth, projects, runs, video, agents, evaluation, admin, apikeys, metrics
-│   ├── engine/                   # Pipeline orchestrator
-│   ├── decision_engine/          # OODA decision logic
-│   ├── agents/                   # Agent implementations
-│   ├── tools/                    # Tool integrations
-│   ├── policy/                   # Policy validation
-│   ├── gitops/                   # GitOps PR automation
-│   ├── db/                       # SQLAlchemy models & CRUD
-│   ├── observability/            # Logging, metrics, health
-│   ├── llm_clients/              # LLM provider adapters
-│   ├── memory/                   # Conversation / vector memory
-│   ├── services/                 # Shared services
-│   ├── integrations/             # External API clients
-│   ├── crud/, models/, schemas/  # Data layer
-│   ├── audit/                    # Audit log subsystem
-│   ├── utils/                    # Circuit breaker, timeouts
-│   ├── web/static/               # Static UI assets
-│   └── config/settings.py
-├── k8s/                          # Raw Kubernetes manifests
-├── helm/devops-agent/            # Helm chart
-├── argocd/                       # ArgoCD Application
-├── configs/                      # Default runtime configs
-├── policies/                     # Policy bundles
-├── sample-node-app/              # Demo target application
-├── tests/                        # pytest suite (108 tests)
-├── scripts/                      # init_db, http smoke tests, generators
-├── docs/                         # architecture, user-guide, api-reference, deploy
-├── reports/, outputs/, logs/     # Runtime artefacts
-└── venv/                         # Local virtualenv (gitignored)
+│   ├── entrypoints/
+│   │   └── cli_main.py           # CLI pipeline runner
+│   ├── decision_engine/
+│   │   ├── orchestrator.py       # V2 Orchestrator (single path)
+│   │   ├── planner/              # Architecture planning
+│   │   ├── generator/            # LLM generation
+│   │   ├── scoring/              # Hybrid evaluation
+│   │   └── repair/               # Healer
+│   ├── engine/
+│   │   ├── llm.py                # NVIDIA-only LLM caller
+│   │   ├── validate.py           # Linter integrations
+│   │   ├── heal.py               # Healer
+│   │   ├── artifact_manager.py   # Write gate + quarantine
+│   │   ├── idempotency.py        # Output normalization
+│   │   ├── policy_engine.py      # Policy validation
+│   │   ├── severity.py           # Severity levels
+│   │   └── secrets_manifest.py   # Secrets documentation
+│   ├── llm_clients/
+│   │   ├── nvidia_client.py      # NVIDIA wrapper
+│   │   └── mock_client.py        # Test-only mock
+│   ├── agents/
+│   │   └── code_analysis_agent.py # Project analysis
+│   ├── tools/
+│   │   └── file_ops.py           # Safe file operations
+│   ├── utils/
+│   │   ├── prompt_loader.py      # Jinja2 sandboxed renderer
+│   │   └── secrets.py            # Secrets loading
+│   └── schemas.py                # Pydantic models
+├── tests/                        # pytest suite
+├── sample-node-app/              # Demo project
+└── docs/                         # Documentation
 ```
 
 ## 📝 Documentation
 
 - [Architecture](docs/architecture.md)
 - [User Guide](docs/user-guide.md)
-- [API Reference](docs/api-reference.md)
 - [Deployment Guide](docs/deploy.md)
-- [Contributing](CONTRIBUTING.md)
-- [Secrets Reference](SECRETS_REFERENCE.md)
 
 ## 🤝 Contributing
 
-We welcome contributions — bug fixes, new agents, additional policy bundles, and infra generation patterns. Fork the repo, create a feature branch, install the dev extras with `pip install -e ".[test]"`, run `pre-commit install` (then `pre-commit run --all-files`), and open a PR. Please include tests for any new behaviour. For full guidelines see [CONTRIBUTING.md](CONTRIBUTING.md).
+We welcome contributions — bug fixes, new prompt templates, additional linter integrations, and infra generation patterns.
+
+1. Fork the repo
+2. Create a feature branch
+3. Install dev extras: `pip install -e ".[test]"`
+4. Run `pre-commit install` (then `pre-commit run --all-files`)
+5. Add tests for any new behaviour
+6. Open a PR
 
 ## 📄 License
 
