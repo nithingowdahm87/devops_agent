@@ -1,7 +1,7 @@
 # 🚀 DevOps Agent — AI-Powered Infrastructure Generation CLI
 
 ![Project Status](https://img.shields.io/badge/status-stable-green)
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
 ![NVIDIA Only](https://img.shields.io/badge/LLM-NVIDIA%20Only-purple.svg)
 ![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)
@@ -167,16 +167,16 @@ All settings via environment variables or `.env` file (auto-loaded from project 
 pytest tests/ -v --tb=short
 
 # Run specific test categories
-pytest tests/test_policy.py -v
 pytest tests/test_v2_modules.py -v
-pytest tests/test_idempotency.py -v
+pytest tests/test_schemas.py -v
+pytest tests/test_clean_markdown.py -v
 ```
 
 The test suite covers:
 - **Core Logic** — `test_v2_modules.py`, `test_schemas.py`, `test_clean_markdown.py`
-- **Validation** — `test_idempotency.py`, `test_write_gate.py`, `test_policy.py`, `test_policy_engine.py`
-- **Safety** — `test_tools_file_ops.py` (path traversal), `test_sanitizer.py` (prompt injection)
-- **Engine** — `test_ooda_healer.py`, `test_memory.py`, `test_integrity_audit.py`
+- **Validation** — `test_write_gate.py`, `test_security_and_integration.py`
+- **Safety** — `test_tools_file_ops.py` (path traversal), prompt injection defense
+- **Engine** — `test_rag_concurrency.py`, `test_encoding.py`, `test_exit_codes.py`
 
 ## ☸️ Deployment
 

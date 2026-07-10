@@ -15,12 +15,12 @@ WORKDIR /build
 # Install build deps (chroma-hnswlib needs C++ build tools)
 # hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc g++ build-essential git \
+    && apt-get install -y --no-install-recommends gcc=4:14.2.0-1 g++=4:14.2.0-1 build-essential=12.12 git=1:2.47.3-0+deb13u1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip and install build tools
 # hadolint ignore=DL3013
-RUN pip install --no-cache-dir uv
+RUN pip install --no-cache-dir uv==0.4.18
 
 # Copy source + config
 COPY pyproject.toml requirements.txt ./
@@ -41,7 +41,7 @@ FROM python:${PYTHON_VERSION}-slim AS runtime
 # hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
-    && apt-get install -y --no-install-recommends libstdc++6 \
+    && apt-get install -y --no-install-recommends libstdc++6=14.2.0-19 \
     && rm -rf /var/lib/apt/lists/*
 
 ARG GIT_SHA
