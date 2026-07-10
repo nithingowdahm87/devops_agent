@@ -1,6 +1,13 @@
 import os
 import yaml
-from src.engine.utils import run_cmd
+import subprocess
+
+def run_cmd(cmd: list) -> tuple:
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        return res.returncode, res.stdout, res.stderr
+    except Exception as e:
+        return 1, "", str(e)
 from src.engine.models import GeneratedFile, ValidationResult
 
 

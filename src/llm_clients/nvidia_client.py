@@ -1,13 +1,12 @@
 import os
 from openai import OpenAI
-from src.utils.secrets import get_secret
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 class NvidiaClient:
     """LLM Client for NVIDIA NIM (OpenAI-compatible)."""
     
     def __init__(self, model: str = "nvidia/nemotron-3-ultra-550b-a55b", temperature: float = 1):
-        self.api_key = get_secret("NVIDIA_API_KEY")
+        self.api_key = os.environ.get("NVIDIA_NIM_API_KEY_NEMOTRON", os.environ.get("NVIDIA_API_KEY"))
         self.model = model
         self.temperature = temperature
         self.client = OpenAI(

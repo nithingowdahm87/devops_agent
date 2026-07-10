@@ -9,9 +9,6 @@ from src.utils.prompt_loader import load_prompt
 from src.decision_engine.contracts.infra_spec import InfraSpec
 from src.decision_engine.planner.architecture_planner import ArchitecturePlanner
 from src.decision_engine.scoring.scorecard import weighted_score
-from src.decision_engine.repair.repair_agent import RepairAgent
-from src.decision_engine.confidence.confidence_score import compute_confidence
-from src.decision_engine.confidence.action_router import decide_action
 
 def test_prompt_loader():
     print("Testing PromptLoader...")
@@ -56,37 +53,10 @@ def test_scoring():
     assert score == 67.0
     print("✅ Scoring passed")
 
-def test_repair():
-    print("Testing RepairAgent...")
-    agent = RepairAgent(max_retries=3)
-    
-    def validator(content):
-        return ("FIXED" in content, "Error: Missing FIXED")
-    
-    def fixer(content, error):
-        return content + "\nFIXED"
-        
-    result = agent.repair_until_valid("initial", validator, fixer)
-    assert "FIXED" in result
-    print("✅ Repair passed")
-
-def test_confidence():
-    print("Testing Confidence...")
-    spec = InfraSpec(file_content="", model_name="", security_score=90, best_practice_score=90)
-    # Base: 90*0.4 + 90*0.3 = 36 + 27 = 63
-    conf = compute_confidence(spec, repair_attempts=0, model_agreement_score=1.0)
-    # Bonus: 20 -> 83
-    print(f"  Confidence: {conf}")
-    
-    decision = decide_action(conf)
-    print(f"  Decision: {decision.action} ({decision.confidence_score})")
-    assert decision.action in ["recommend_review", "recommend_auto_approve"]
-    print("✅ Confidence passed")
 
 if __name__ == "__main__":
     test_prompt_loader()
     test_planner()
     test_scoring()
-    test_repair()
-    test_confidence()
+
     print("\n🎉 ALL V2 MODULES VERIFIED 🎉")

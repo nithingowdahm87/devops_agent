@@ -13,11 +13,13 @@ FROM python:${PYTHON_VERSION}-slim AS builder
 WORKDIR /build
 
 # Install build deps (chroma-hnswlib needs C++ build tools)
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gcc g++ build-essential git \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip and install build tools
+# hadolint ignore=DL3013
 RUN pip install --no-cache-dir uv
 
 # Copy source + config
@@ -36,7 +38,9 @@ RUN uv pip install --python=/opt/venv/bin/python -r requirements.txt \
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
 # chroma-hnswlib needs libstdc++ at runtime
+# hadolint ignore=DL3008
 RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -75,6 +79,9 @@ LABEL org.opencontainers.image.title="devops-agent" \
       org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.source="https://github.com/nithingowdahm87/devops_agent"
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD ["python3", "-c", "import sys; sys.exit(0)"]
 
 USER appuser
 

@@ -55,20 +55,37 @@ class RAGStore:
             self._collection = None
             return
 
-        try:
-            # Use persistent client with local directory
-            self._client = chromadb.PersistentClient(
-                path=".chroma_db",
-                settings=Settings(anonymized_telemetry=False)
-            )
-            self._collection = self._client.get_or_create_collection(
-                name="devops_rag",
-                metadata={"description": "DevOps best practices RAG store"}
-            )
-            log.info("RAG store initialized with ChromaDB")
-        except Exception as e:
-            log.warning(f"Failed to initialize ChromaDB: {e}. RAG disabled.")
-            self._collection = None
+        import shutil
+        import os
+
+        db_path = ".chroma_db"
+
+        # Handle schema migration errors by cleaning up and retrying once
+        for attempt in range(2):
+            try:
+                # Clean up corrupted DB on retry
+                if attempt == 1 and os.path.exists(db_path):
+                    log.warning("Retrying ChromaDB init after cleaning corrupted DB")
+                    shutil.rmtree(db_path, ignore_errors=True)
+
+                # Use persistent client with local directory
+                self._client = chromadb.PersistentClient(
+                    path=db_path,
+                    settings=Settings(anonymized_telemetry=False)
+                )
+                self._collection = self._client.get_or_create_collection(
+                    name="devops_rag",
+                    metadata={"description": "DevOps best practices RAG store"}
+                )
+                log.info("RAG store initialized with ChromaDB")
+                return
+            except Exception as e:
+                if attempt == 0 and ("no such column" in str(e) or "schema" in str(e).lower()):
+                    log.warning(f"ChromaDB schema issue, will retry after cleanup: {e}")
+                    continue
+                log.warning(f"Failed to initialize ChromaDB: {e}. RAG disabled.")
+                self._collection = None
+                return
 
     def add(self, content: str, metadata: dict, doc_id: str) -> bool:
         """

@@ -13,11 +13,7 @@ from src.decision_engine.planner.architecture_planner import ArchitecturePlanner
 from src.decision_engine.generator.llm_generator import LLMGenerator
 from src.decision_engine.scoring.scorecard import weighted_score
 from src.decision_engine.scoring.evaluator import Evaluator
-from src.decision_engine.repair.repair_agent import RepairAgent
-from src.decision_engine.confidence.confidence_score import compute_confidence
-from src.decision_engine.confidence.action_router import decide_action
 from src.utils.prompt_loader import load_prompt
-from src.memory.long_term_memory import LongTermMemory
 
 # Clients
 from src.llm_clients.nvidia_client import NvidiaClient
@@ -37,12 +33,9 @@ class V2Orchestrator:
     def __init__(self, environment: str = "dev"):
         self.planner = ArchitecturePlanner()
         self.evaluator = Evaluator()
-        self.repair_agent = RepairAgent()
         self.validator = Validator()
         self.healer = Healer()
         self.environment = environment
-        self.memory = None # Init later with project_path
-
         # Global customization preferences (K8s-first, reusable later)
         self._custom_prompt_initialized = False
         self._custom_prompt_mode = "none"   # "none" | "file" | "qa"
@@ -89,9 +82,6 @@ class V2Orchestrator:
         """
         self.publisher = publisher
         logger.info("🚀 Starting V2 Decision Engine Pipeline | GitOps=%s | Publisher=%s", gitops, publisher.mode if publisher else "None")
-        self.memory = LongTermMemory(project_path)
-        
-        # 0. GitOps Setup (New)
         if gitops and gitops_repo:
             self._setup_gitops_repo(project_path, gitops_repo)
         
@@ -564,10 +554,6 @@ class V2Orchestrator:
                         # Final re-validate
                         val_res = self.validator.validate(gen_file)
                     
-                    # Level 10 Idempotency (Gap 3)
-                    from src.engine.idempotency import IdempotencyEngine
-                    gen_file.content = IdempotencyEngine.stabilize(gen_file.path, gen_file.content)
-
                     # Level 10 Write Gate
                     # CRITICAL = never write, HIGH = prod blocker, MEDIUM = healed-but-imperfect, LOW = clean
                     if not val_res.passed:
@@ -629,10 +615,6 @@ class V2Orchestrator:
                 if not no_heal and not val_res.passed:
                     gen_file = self.healer.heal(gen_file, val_res.errors)
                 
-                # Level 10 Idempotency (Gap 3)
-                from src.engine.idempotency import IdempotencyEngine
-                gen_file.content = IdempotencyEngine.stabilize(gen_file.path, gen_file.content)
-
                 from src.engine.artifact_manager import ArtifactManager
                 from src.engine.severity import Severity
                 art_mgr = ArtifactManager(project_path, environment)
@@ -644,13 +626,7 @@ class V2Orchestrator:
             # Legacy fallback single file (e.g. cicd if not in multi-list above)
             return []
         
-        # 8. Save to Memory
-        self.memory.store_decision(
-            stage=stage_key,
-            content=final_content,
-            reason=best_spec.reasoning,
-            decision="APPROVED"
-        )
+        # Memory removed
 
     def _write_files_direct(self, files: list[GeneratedFile], project_path: str):
         import os

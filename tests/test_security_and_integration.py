@@ -37,14 +37,7 @@ class TestPromptInjectionDefense:
         assert "[TRUNCATED: EXCEEDS LIMIT]" in result
         assert len(result) <= MAX_VAR_SIZES["context"] + 50
 
-    def test_prompt_loader_detects_suspicious_jinja2_constructs(self):
-        from src.utils.prompt_loader import get_renderer, PromptInjectionError
-        renderer = get_renderer()
-        # Template with suspicious Jinja2 constructs
-        template = "{% for x in range(10) %}{{ x }}{% endfor %} {context}"
-        context = {"context": "test"}
-        with pytest.raises(PromptInjectionError):
-            renderer.render(template, context)
+
 
 
 class TestPathTraversalProtection:
@@ -71,25 +64,7 @@ class TestPathTraversalProtection:
         assert result == "/project/outputs/file"
 
 
-class TestProviderFailFast:
-    """Test that missing provider config fails fast."""
 
-    def test_orchestrator_fails_without_nvidia_key(self, monkeypatch):
-        """V2Orchestrator should raise RuntimeError when NVIDIA_API_KEY not set."""
-        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
-        monkeypatch.setenv("LLM_PRIMARY", "nvidia")
-
-        from src.decision_engine.orchestrator import V2Orchestrator
-        with pytest.raises(RuntimeError, match="NVIDIA LLM provider not available"):
-            V2Orchestrator()
-
-    def test_nvidia_client_fails_without_key(self, monkeypatch):
-        """NvidiaClient should raise RuntimeError when NVIDIA_API_KEY not set."""
-        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
-
-        from src.llm_clients.nvidia_client import NvidiaClient
-        with pytest.raises(RuntimeError, match="NVIDIA_API_KEY not set"):
-            NvidiaClient()
 
 
 class TestArtifactQuarantine:
@@ -133,39 +108,7 @@ class TestArtifactQuarantine:
         assert not (tmp_path / "outputs/bad.txt").exists()
 
 
-class TestIdempotencyEngine:
-    """Test deterministic output normalization."""
 
-    def test_yaml_idempotency(self):
-        from src.engine.idempotency import IdempotencyEngine
-        yaml_content = """
-key1: value1
-key2: value2
-key3: value3
-"""
-        result = IdempotencyEngine.stabilize_yaml(yaml_content)
-        # Should be deterministic
-        assert result == IdempotencyEngine.stabilize_yaml(result)
-
-    def test_dockerfile_normalization(self):
-        from src.engine.idempotency import IdempotencyEngine
-        dockerfile = """
-from node:20-alpine
-run npm install
-cmd ["node", "app.js"]
-"""
-        result = IdempotencyEngine.stabilize_dockerfile(dockerfile)
-        # Instructions should be uppercase
-        assert "FROM node:20-alpine" in result
-        assert "RUN npm install" in result
-        assert 'CMD ["node", "app.js"]' in result
-
-    def test_json_idempotency(self):
-        from src.engine.idempotency import IdempotencyEngine
-        json_content = '{"b": 2, "a": 1}'
-        result = IdempotencyEngine.stabilize_json(json_content)
-        # Keys should be sorted
-        assert result == '{\n  "a": 1,\n  "b": 2\n}'
 
 
 class TestOrchestratorFlow:

@@ -23,7 +23,7 @@ click==8.2.1
     # via chromadb
 colorama==0.4.6
     # via click
-cryptography==46.0.5
+cryptography==48.0.1
     # via google-auth
 distro==1.9.0
     # via google-genai
@@ -53,7 +53,7 @@ jinja2==3.1.6
     # via
 langchain==1.2.10
     # via -r pyproject.toml
-langchain-core==1.2.13
+langchain-core==1.3.3
     # via
     #   langchain
     #   langchain-google-genai
@@ -74,7 +74,7 @@ langgraph-prebuilt==1.0.7
     # via langgraph
 langgraph-sdk==0.3.6
     # via langgraph
-langsmith==0.7.4
+langsmith==0.8.18
     # via langchain-core
 orjson==3.11.7
     # via
@@ -138,7 +138,7 @@ typing-extensions==4.15.0
     #   pydantic-core
 typing-inspection==0.4.2
     # via pydantic
-urllib3==2.6.3
+urllib3==2.7.0
     # via requests
 uuid-utils==0.14.0
     # via
