@@ -20,7 +20,7 @@ RUN apt-get update \
 
 # Upgrade pip and install build tools
 # hadolint ignore=DL3013
-RUN pip install --no-cache-dir uv==0.4.18
+RUN pip install --no-cache-dir uv==0.11.28
 
 # Copy source + config
 COPY pyproject.toml requirements.txt ./
