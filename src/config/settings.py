@@ -1,6 +1,8 @@
 """Pydantic Settings for CLI-only DevOps Agent (NVIDIA-only)."""
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+import yaml
 
 
 class Settings(BaseSettings):
@@ -11,8 +13,6 @@ class Settings(BaseSettings):
     # NVIDIA LLM
     NVIDIA_API_KEY: str | None = Field(default=None)
     NVIDIA_MODEL: str = Field(default="meta/llama-3.1-405b-instruct")
-
-
 
     # Generation params
     LLM_TEMPERATURE: float = Field(default=0.1)
@@ -30,3 +30,16 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+_PROFILES_PATH = Path(__file__).parent.parent.parent / "configs" / "resource_profiles.yaml"
+
+
+def load_resource_profiles() -> dict:
+    """Load per-environment resource profiles from configs/resource_profiles.yaml."""
+    if not _PROFILES_PATH.exists():
+        return {}
+    return yaml.safe_load(_PROFILES_PATH.read_text()) or {}
+
+
+RESOURCE_PROFILES: dict = load_resource_profiles()

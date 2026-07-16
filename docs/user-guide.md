@@ -9,7 +9,7 @@ This guide walks you through the complete user journey from registration to view
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email": "alice@example.com", "password": "secret123"}'
+  -d '{"email": "alice@example.com", "password": "<password>"}'
 ```
 
 **Response:**
@@ -28,7 +28,7 @@ Save the `access_token` — you will use it for all authenticated requests.
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/login \
-  -d "username=alice@example.com&password=secret123"
+  -d "username=alice@example.com&password=<password>"
 ```
 
 Returns the same `access_token` structure.

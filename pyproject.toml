@@ -10,25 +10,23 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 dependencies = [
-    "langchain",
-    "langgraph",
-    "requests",
-    "pyyaml",
+    "requests>=2.31.0",
+    "pyyaml>=6.0",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0.0",
-    "requests>=2.31.0",
-    "jinja2>=3.1.0",
-    "chromadb>=0.4.0",
+    "jinja2>=3.1.5",
     "tenacity>=8.0.0",
-    "langchain-core>=1.2.22",
-    "langsmith>=0.8.18",
     "urllib3>=2.7.0",
     "cryptography>=48.0.1",
     "openai>=1.30.0",
+    "jsonschema>=4.0.0",
 ]
 
 [project.optional-dependencies]
+rag = [
+    "chromadb>=0.5.0",
+]
 test = [
     "pytest>=7.0",
     "pytest-cov",
@@ -47,3 +45,18 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 pythonpath = ["."]
 addopts = "-v --tb=short"
+filterwarnings = [
+    "error::DeprecationWarning",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+warn_return_any = true
+warn_unused_configs = true
+exclude = [
+    "tests/",
+    "sample-node-app/",
+    "scripts/",
+]

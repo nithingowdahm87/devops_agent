@@ -1,76 +1,148 @@
-# DevOps Agent SaaS — Architecture
+# devops_agent — Architecture
 
-## System Overview
+> **Version**: 2.x CLI-only | **LLM**: NVIDIA NIM | **Stack**: Generic K8s (EKS/GKE/bare-metal)
+
+## Overview
+
+devops_agent is a **CLI-only** single-process Python tool. There is no server, no
+database, no background workers, and no API. One invocation runs the full pipeline
+and exits with a structured exit code.
+
+## End-to-End Pipeline
 
 ```
-                              ┌─────────────────────────────┐
-                              │          Clients            │
-                              │  Web UI / CLI / HTTP API    │
-                              └──────────────┬──────────────┘
-                                             │ HTTP/REST
-                                             ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          FastAPI Application                             │
-│                                                                          │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐    │
-│  │   Auth   │  │ Projects │  │  Runs    │  │   Video Jobs         │    │
-│  │ Router   │  │ Router   │  │ Router   │  │   Router             │    │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────────┬───────────┘    │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐    │
-│  │  Agents  │  │Evaluation│  │  Admin   │  │  Observability       │    │
-│  │ Router   │  │ Router   │  │ Router   │  │  Logging Middleware  │    │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────────────────────┘    │
-│       │             │             │                                     │
-└───────┼─────────────┼─────────────┼─────────────────────────────────────┘
-        │             │             │
-        ▼             ▼             ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          CRUD Layer (SQLAlchemy ORM)                     │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────────────────┐  │
-│  │  Users   │  │ Projects │  │  Runs    │  │ VideoTasks / Agents /  │  │
-│  │          │  │          │  │          │  │ EvaluationResults      │  │
-│  └──────────┘  └──────────┘  └──────────┘  └────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────┘
-                                             │
-                                             ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         Database (SQLite / Postgres)                     │
-└─────────────────────────────────────────────────────────────────────────┘
+main.py (argparse)
+└─► src/entrypoints/cli_main.run_cli()
+      ├─ load_or_run_analysis(project_path)
+      │     └─ CodeAnalysisAgent.analyze()
+      │           ├─ ContextGatherer (raw text dump of project files)
+      │           ├─ heuristic detectors (_detect_node, _detect_python,
+      │           │   _detect_architecture, _detect_ports, _detect_env_vars)
+      │           └─ ProjectContext (Pydantic v2) → .devops_context.json cache
+      │
+      └─ V2Orchestrator.run_pipeline()
+            ├─ ArchitecturePlanner.create_plan()  → ArchitecturePlan
+            ├─ _isolate_context() per service
+            │     └─ loads resource profile from configs/resource_profiles.yaml
+            │        keyed by environment (dev/staging/prod) + stack type
+            │
+            └─ for stage in [dockerfile, docker_compose, kubernetes,
+                              ingress, secrets, github_actions]:
+                  _execute_stage()
+                    ├─ _build_prompt()
+                    │     └─ load configs/prompts/{stage}/{role}.md
+                    │        render via Jinja2 SandboxedEnvironment
+                    │        (context filtered to ALLOWED_TEMPLATE_VARS only)
+                    ├─ LLMGenerator.generate()
+                    │     ├─ _fetch_rag_snippet() → ChromaDB local store (optional)
+                    │     └─ NvidiaClient.call() → NVIDIA NIM API
+                    ├─ heuristic scoring → InfraSpec.security_score
+                    ├─ Evaluator.evaluate_candidates() → weighted_score()
+                    ├─ Validator.validate()
+                    │     ├─ hadolint (Dockerfiles)
+                    │     ├─ kubeconform (K8s manifests)
+                    │     ├─ yamllint (GitHub Actions)
+                    │     └─ jsonschema (ArgoCD, GHA schemas)
+                    ├─ PolicyEngine.validate_artifact()
+                    │     ├─ Python rules (prod/dev environment-aware)
+                    │     └─ OPA/Rego evaluation (policies/k8s/manifests.rego)
+                    ├─ Healer.heal() — NvidiaClient.call() with error context
+                    │   (skipped if --no-heal)
+                    └─ ArtifactManager.write_gate()
+                          ├─ CRITICAL → blocked entirely
+                          ├─ HIGH     → .broken file (prod) or write-through (dev)
+                          ├─ MEDIUM/LOW → written to outputs/
+                          ├─ dry_run  → history only, no primary write
+                          └─ always   → .artifacts_history/<env>/<run_id>/
 ```
 
-## Component Descriptions
+## Output Structure
 
-| Component | Technology | Responsibility |
-|---|---|---|
-| **FastAPI App** | FastAPI + Uvicorn | HTTP server, routing, middleware, lifespan |
-| **Auth Router** | `src/api/routers/auth.py` | Register, login → JWT token generation |
-| **Projects Router** | `src/api/routers/projects.py` | CRUD for DevOps pipeline projects |
-| **Runs Router** | `src/api/routers/runs.py` | CI/CD run lifecycle (queue → run → complete/fail) |
-| **Video Router** | `src/api/routers/video.py` | Async video generation job submission & status |
-| **Agents Router** | `src/api/routers/agents.py` | SaaS agent registry, heartbeat, capabilities |
-| **Evaluation Router** | `src/api/routers/evaluation.py` | Cohen's kappa evaluation scoring |
-| **Admin Router** | `src/api/routers/admin.py` | Health checks, system stats |
-| **CRUD Layer** | `src/db/crud.py` + feature modules | Database operations per entity |
-| **Models** | `src/db/models.py` + feature models | SQLAlchemy ORM table definitions |
-| **Schemas** | `src/schemas.py` + feature schemas | Pydantic validation models |
-| **Database** | SQLite (dev) / PostgreSQL (prod) | Persistent storage via SQLAlchemy |
-| **Observability** | `src/observability/logging.py` | Structured JSON logging, request middleware |
+```
+outputs/
+  per-service/<svc>/
+    Dockerfile
+    .dockerignore
+    k8s/
+      deployment.yaml  service.yaml  hpa.yaml  pdb.yaml
+      netpol.yaml      ingress.yaml
+    secrets/
+      sealedsecret.yaml          (or vault_policy.hcl / external-secret.yaml)
+      SECRETS_REFERENCE.md
+    .github/workflows/
+      <svc>-ci.yml
+  shared/
+    docker-compose.yml
 
-## CLI Integration
+.artifacts_history/<env>/<run_id>/   ← immutable audit trail, every run
+audit_logs/<run_id>.json             ← structured run summary
+```
 
-The FastAPI server is complemented by a CLI entry-point (`main.py --mode server`) and a Kimchi CLI agent (`src/agent/`) that:
-- Analyzes codebases (Stage 1: Code Discovery)
-- Routes to LLM providers (Stage 2: Multi-Provider Router)
-- Generates GitOps pipelines (Stage 3: Pipeline Generation)
-- Validates and heals artifacts (Stage 4: OODA Healing)
-- Outputs structured artifacts (Stage 5: Artifact Hierarchy)
+## Module Map
 
-## Data Flow
+```
+src/
+  entrypoints/    cli_main.py — CLI parsing, SIGTERM handler, audit log write
+  decision_engine/
+    orchestrator.py          — V2Orchestrator, stage loop, _isolate_context
+    planner/                 — ArchitecturePlanner, rules.py
+    generator/               — LLMGenerator (RAG + NvidiaClient)
+    scoring/                 — Evaluator, weighted_score()
+    contracts/               — ArchitecturePlan, InfraSpec, DecisionResult
+  engine/
+    heal.py                  — Healer (uses NvidiaClient directly)
+    validate.py              — Validator (hadolint, kubeconform, yamllint, jsonschema)
+    policy_engine.py         — PolicyEngine (Python rules + OPA/Rego)
+    artifact_manager.py      — write_gate(), quarantine, history, dry_run
+    rag.py                   — ChromaDB singleton (optional, guarded by try/except)
+    severity.py              — Severity enum, ExitCode, get_exit_code()
+  llm_clients/
+    nvidia_client.py         ← single LLM client for entire codebase
+    mock_client.py           ← test-only mock
+  analysis/
+    code_analysis_agent.py   — heuristic project detection, .devops_context.json cache
+  tools/
+    file_ops.py              — _safe_path(), read_file(), write_file(), scan_directory()
+    context_gatherer.py      — raw project text dump
+  config/
+    settings.py              — pydantic-settings, loads configs/resource_profiles.yaml
+  utils/
+    logger.py                — StructuredFormatter, ContextVar correlation_id
+    prompt_loader.py         — PromptRenderer (Jinja2 SandboxedEnvironment, allowlist)
+    errors.py                — domain exception hierarchy → ExitCode mapping
+    analysis_utils.py        — load_or_run_analysis() with cache
+  schemas.py                 — ProjectContext, InfraSpec, ArchitecturePlan,
+                               StageResult (all Pydantic v2)
+```
 
-1. **Client** authenticates via `POST /api/v1/auth/login` → receives JWT
-2. **Client** creates a project via `POST /api/v1/projects/` with JWT bearer token
-3. **Client** starts a run via `POST /api/v1/runs/` → agent picks up work
-4. **Optional**: Client submits a video job via `POST /api/v1/video/jobs`
-5. **Optional**: Client registers agents via `POST /api/v1/agents/` and sends heartbeats
-6. **Optional**: Client runs evaluations via `POST /api/v1/evaluation/` (Cohen's kappa)
-7. All resources scoped to the authenticated user via `get_current_user` dependency
+## Security Controls
+
+| Control | Implementation |
+|---|---|
+| Prompt injection | Jinja2 `SandboxedEnvironment`, `ALLOWED_TEMPLATE_VARS` allowlist, per-var size caps |
+| Path traversal | `_safe_path()` — null byte check, `os.path.abspath` prefix enforcement |
+| Command injection | `_setup_gitops_repo()` uses gitpython + regex URL allowlist (no subprocess) |
+| Write gate | `ArtifactManager.write_gate()` — CRITICAL blocked, HIGH quarantined as `.broken` |
+| Fail-fast key | `NvidiaClient.__init__()` raises `RuntimeError` immediately if key is empty |
+| Policy enforcement | Python rules + OPA/Rego (`policies/k8s/manifests.rego`) |
+| Secret generation | Secrets prompts enforce placeholder-only values, never real credentials |
+
+## Extension Points
+
+| What to add | Where |
+|---|---|
+| New artifact type | `configs/prompts/<stage>/<role>.md` + add stage key to `prompt_map` in `_execute_stage()` |
+| New K8s policy | `policies/k8s/manifests.rego` — auto-evaluated by OPA binary |
+| New LLM provider | Implement `.call()` interface in `src/llm_clients/`, add to `_init_generators()` |
+| New resource profile | Add entry to `configs/resource_profiles.yaml` |
+| New stack detection | Add `_detect_<stack>()` in `src/analysis/code_analysis_agent.py` |
+
+## Exit Codes
+
+| Code | Meaning |
+|---|---|
+| 0 | All stages succeeded |
+| 1 | Critical failure (LLM unavailable, config error) |
+| 2 | Policy violation in generated artifact |
+| 3 | Integrity failure (path traversal attempt) |
+| 130 | Interrupted by SIGTERM (K8s Job preemption) |

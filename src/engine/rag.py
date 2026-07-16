@@ -5,6 +5,7 @@ Provides a singleton RAGStore with thread-safe operations for concurrent access.
 """
 
 from __future__ import annotations
+import hashlib
 import logging
 import threading
 from typing import Optional
@@ -212,7 +213,6 @@ def save_to_rag(artifact_type: str, content: str, source: str) -> bool:
     if not store.is_ready():
         return False
 
-    import hashlib
     doc_id = hashlib.sha256(f"{artifact_type}:{content[:100]}".encode()).hexdigest()[:16]
     metadata = {
         "artifact_type": artifact_type,

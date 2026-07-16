@@ -93,7 +93,7 @@ class DevFormatter(logging.Formatter):
 _configured = False
 
 
-def configure_logging(json_mode: bool = False, level: int = logging.WARNING):
+def configure_logging(json_mode: bool = False, level: int = logging.INFO):
     """
     Configure the root devops-agent logger.
 

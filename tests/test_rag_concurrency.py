@@ -3,9 +3,22 @@ Stress test for RAG store concurrency.
 Tests concurrent retrieval calls to ensure thread safety and no data corruption.
 """
 
+import pytest
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+try:
+    import chromadb  # noqa: F401
+    _RAG_AVAILABLE = True
+except ImportError:
+    _RAG_AVAILABLE = False
+
+pytestmark = pytest.mark.skipif(
+    not _RAG_AVAILABLE,
+    reason="chromadb not installed — install with: pip install devops-agent[rag]",
+)
+
 from src.engine.rag import get_rag_store, save_to_rag, get_rag_context
 
 
@@ -75,7 +88,6 @@ def test_rag_concurrency():
             pass
 
     print("✅ RAG concurrency stress test PASSED")
-    return True
 
 
 def test_rag_singleton():

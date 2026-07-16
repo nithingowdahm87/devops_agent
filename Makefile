@@ -1,5 +1,6 @@
 # DevOps Agent Makefile
-.PHONY: install test lint run clean help
+.PHONY: install test test-unit lint format run run-heal docker-build docker-run clean check tree \
+        health dry-run diff type-check coverage integration audit
 
 # Default target
 help:
@@ -14,6 +15,13 @@ help:
 	@echo "  docker-build - Build Docker image"
 	@echo "  docker-run  - Run agent in Docker"
 	@echo "  clean       - Clean build artifacts"
+	@echo "  health      - Preflight check all dependencies"
+	@echo "  dry-run     - Preview artifacts for sample-node-app without writing"
+	@echo "  diff        - Compare latest two runs in .artifacts_history/"
+	@echo "  type-check  - Run mypy strict type checking"
+	@echo "  coverage    - Run tests with HTML coverage report"
+	@echo "  integration - Run integration tests against sample-node-app"
+	@echo "  audit       - Show latest audit log"
 
 # Install package with dev dependencies
 install:
@@ -86,3 +94,40 @@ check:
 # Show project structure
 tree:
 	@find . -type f -name "*.py" | grep -v __pycache__ | grep -v venv | sort
+
+## health: Preflight check all dependencies
+health:
+	python main.py --health
+
+## dry-run: Preview artifacts for sample-node-app without writing
+dry-run:
+	python main.py --no-prompts --dry-run sample-node-app
+
+## diff: Compare latest two runs in .artifacts_history/
+diff:
+	@runs=$$(ls -t .artifacts_history/ 2>/dev/null | head -2); \
+	 count=$$(echo "$$runs" | wc -w); \
+	 if [ "$$count" -lt 2 ]; then echo "Need at least 2 runs to diff."; exit 1; fi; \
+	 new=$$(echo $$runs | cut -d' ' -f1); \
+	 old=$$(echo $$runs | cut -d' ' -f2); \
+	 echo "Diffing $$old → $$new"; \
+	 diff -r .artifacts_history/$$old .artifacts_history/$$new --color=always || true
+
+## type-check: Run mypy strict type checking
+type-check:
+	mypy src/ --config-file pyproject.toml
+
+## coverage: Run tests with HTML + terminal coverage report
+coverage:
+	pytest tests/ --cov=src --cov-report=html --cov-report=term-missing
+	@echo "HTML report: htmlcov/index.html"
+
+## integration: Run integration tests against sample-node-app
+integration:
+	pytest tests/test_integration_sample_node_app.py -v
+
+## audit: Show latest audit log
+audit:
+	@ls -lt audit_logs/*.json 2>/dev/null | head -10 || echo "No audit logs yet."
+	@echo "---"
+	@cat $$(ls -t audit_logs/*.json 2>/dev/null | head -1) 2>/dev/null || true

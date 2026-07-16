@@ -34,11 +34,12 @@ class ArtifactManager:
     Ensures safe writes via the 'Write Gate'.
     """
 
-    def __init__(self, project_path: str, environment: str = "dev"):
-        self.project_path = project_path
-        self.environment = environment
+    def __init__(self, project_path: str, environment: str = "dev", dry_run: bool = False):
+        self.project_path = os.path.realpath(os.path.abspath(project_path))
+        self.environment = re.sub(r'[^a-zA-Z0-9._\-]', '_', environment)
+        self.dry_run = dry_run
         self.history_dir = os.path.join(
-            project_path, ".artifacts_history", environment
+            self.project_path, ".artifacts_history", self.environment
         )
         self.run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.current_run_dir = os.path.join(self.history_dir, self.run_id)
@@ -50,6 +51,7 @@ class ArtifactManager:
         CRITICAL : Never write.
         HIGH      : Write to .broken (or straight-through in dev).
         MEDIUM/LOW: Write to primary path.
+        dry_run   : Always skip primary write; still writes to history for audit.
         """
         rel_path = _sanitize_rel_path(rel_path)
         if not rel_path:
@@ -62,7 +64,14 @@ class ArtifactManager:
         write_file(history_path, content)
 
         if severity == Severity.CRITICAL:
-            logger.error(f"Write Gate BLOCKED {rel_path} due to CRITICAL failure.")
+            logger.error("Write Gate BLOCKED %s due to CRITICAL failure.", rel_path)
+            return False
+
+        if self.dry_run:
+            logger.info(
+                "dry_run_skip_write",
+                extra={"path": rel_path, "content_bytes": len(content), "preview": content[:200]},
+            )
             return False
 
         if severity == Severity.HIGH:
@@ -80,7 +89,7 @@ class ArtifactManager:
             return False
 
         write_file(full_path, content)
-        logger.info(f"Write Gate APPROVED {rel_path}.")
+        logger.info("Write Gate APPROVED %s.", rel_path)
         return True
 
     def get_latest_valid(self, rel_path: str) -> str:

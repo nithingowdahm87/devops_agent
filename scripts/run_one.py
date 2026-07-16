@@ -11,7 +11,8 @@ os.environ['LLM_FALLBACK_ORDER'] = ''
 os.environ['LLM_MAX_TOKENS'] = '16384'
 os.environ['LLM_TIMEOUT_SECONDS'] = '180'
 os.environ['LLM_MAX_RETRIES'] = '3'
-os.environ['NVIDIA_API_KEY'] = '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'
+if not os.environ.get('NVIDIA_API_KEY'):
+    raise EnvironmentError("NVIDIA_API_KEY environment variable is not set")
 
 sys.path.insert(0, '/home/nithin/repos/devops_agent/src')
 

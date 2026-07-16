@@ -1,33 +1,52 @@
-from typing import List, Dict, Any
+import copy
+import json
 import logging
 import os
+import re
+from typing import List, Dict, Any, Optional
 
-# Schemas
-from src.schemas import ProjectContext, Decision, StageResult
+from src.schemas import ProjectContext
 from src.decision_engine.contracts.architecture_plan import ArchitecturePlan
 from src.decision_engine.contracts.infra_spec import InfraSpec
-from src.decision_engine.contracts.decision_result import DecisionResult
-
-# Modules
 from src.decision_engine.planner.architecture_planner import ArchitecturePlanner
 from src.decision_engine.generator.llm_generator import LLMGenerator
-from src.decision_engine.scoring.scorecard import weighted_score
 from src.decision_engine.scoring.evaluator import Evaluator
 from src.utils.prompt_loader import load_prompt
-
-# Clients
 from src.llm_clients.nvidia_client import NvidiaClient
-from src.llm_clients.mock_client import MockClient
-
-# Engine
 from src.engine.validate import Validator
 from src.engine.heal import Healer
 from src.engine.models import GeneratedFile
-
-# Tools
-from src.tools.file_ops import write_file
+from src.engine.artifact_manager import ArtifactManager
+from src.engine.severity import Severity
+from src.engine.policy_engine import PolicyEngine, ProjectModel
 
 logger = logging.getLogger("devops-agent")
+
+# Maps stage key → (prompt_dir, prompt_file)
+_PROMPT_MAP: dict[str, tuple[str, str]] = {
+    "dockerfile":      ("docker", "docker_production"),
+    "docker_compose":  ("docker", "docker_compose"),
+    "kubernetes":      ("k8s",    "k8s_production"),
+    "cicd":            ("cicd",   "cicd_production"),
+    "github_actions":  ("cicd",   "github_actions"),
+    "gitops_manifests":("k8s",    "argocd"),
+    "secrets_doc":     ("docs",   "secrets"),
+    "scan":            ("debug",  "healer"),
+}
+
+# Stages that produce per-service output vs project-wide
+_PER_SERVICE_STAGES = {"dockerfile", "github_actions", "kubernetes"}
+
+# Fallback filenames when LLM doesn't emit FILENAME: blocks
+_FALLBACK_FILENAMES: dict[str, str] = {
+    "cicd":            ".github/workflows/ci.yml",
+    "docker_compose":  "docker-compose.yml",
+    "dockerfile":      "Dockerfile",
+    "kubernetes":      "k8s/manifests.yaml",
+    "gitops_manifests":"applicationset.yaml",
+    "secrets_doc":     "docs/secrets.md",
+}
+
 
 class V2Orchestrator:
     def __init__(self, environment: str = "dev"):
@@ -36,661 +55,383 @@ class V2Orchestrator:
         self.validator = Validator()
         self.healer = Healer()
         self.environment = environment
-        # Global customization preferences (K8s-first, reusable later)
         self._custom_prompt_initialized = False
-        self._custom_prompt_mode = "none"   # "none" | "file" | "qa"
         self._custom_prompt_text = ""
-        
-        # Initialize Generators (Safe Layout)
-        self.generators = []
+        self.publisher = None
+        self.generators: list[LLMGenerator] = []
         self._init_generators()
-        
-    def _init_generators(self):
-        """Initialize NVIDIA client only. Fail fast if not configured.
 
-        Respects LLM_PRIMARY env var — only initializes the primary provider.
-        If the primary provider fails to initialize (missing API key, etc.), we DO NOT
-        silently fall back to MockClient. Instead, we log a prominent error and raise,
-        because generating mock infrastructure is dangerous and misleading.
-        """
+    def _init_generators(self) -> None:
         primary = os.environ.get("LLM_PRIMARY", "").lower()
         if primary != "nvidia":
-            raise RuntimeError(f"Only NVIDIA provider is supported. Got LLM_PRIMARY={primary}")
-
+            raise RuntimeError(f"Only NVIDIA provider is supported. Got LLM_PRIMARY={primary!r}")
         try:
             client = NvidiaClient()
             self.generators.append(LLMGenerator(client, "NVIDIA"))
             logger.info("Initialized NVIDIA LLM provider")
         except Exception as e:
-            error_msg = (
-                "\n❌ ═════════════════════════════════════════════════════════════\n"
-                "❌  NVIDIA LLM PROVIDER NOT CONFIGURED — ABORTING        ═\n"
-                "═══════════════════════════════════════════════════════════════\n"
-                "The pipeline requires a real NVIDIA LLM backend.\n\n"
-                "To fix, set:\n"
-                "  export NVIDIA_API_KEY=your_key_here\n\n"
-                "Current LLM_PRIMARY: " + os.environ.get("LLM_PRIMARY", "(unset)") + "\n"
-                "═══════════════════════════════════════════════════════════════\n"
+            msg = (
+                "\n❌ NVIDIA LLM PROVIDER NOT CONFIGURED — ABORTING\n"
+                "The pipeline requires a real NVIDIA LLM backend.\n"
+                "  export NVIDIA_API_KEY=nvapi-...\n"
             )
-            logger.critical(error_msg)
-            print(error_msg)
-            raise RuntimeError("NVIDIA LLM provider not available. Configure NVIDIA_API_KEY.")
-        
-    def run_pipeline(self, project_path: str, context: ProjectContext, environment: str = "dev", gitops: bool = False, gitops_repo: str = None, target_service: str = None, publisher=None, no_prompts: bool = False, no_heal: bool = False):
-        """
-        Main entry point for V2 Pipeline.
-        """
+            logger.critical(msg)
+            raise RuntimeError("NVIDIA LLM provider not available. Configure NVIDIA_API_KEY.") from e
+
+    # ------------------------------------------------------------------ #
+    #  Public entry point                                                  #
+    # ------------------------------------------------------------------ #
+
+    def run_pipeline(
+        self,
+        project_path: str,
+        context: ProjectContext,
+        environment: str = "dev",
+        gitops: bool = False,
+        gitops_repo: Optional[str] = None,
+        target_service: Optional[str] = None,
+        publisher=None,
+        no_prompts: bool = False,
+        no_heal: bool = False,
+    ) -> None:
         self.publisher = publisher
-        logger.info("🚀 Starting V2 Decision Engine Pipeline | GitOps=%s | Publisher=%s", gitops, publisher.mode if publisher else "None")
+
         if gitops and gitops_repo:
             self._setup_gitops_repo(project_path, gitops_repo)
-        
-        # 1. Plan Architecture
+
         plan = self.planner.create_plan(context)
         print(f"🏗️  Architecture Plan: {plan.service_type.upper()} | Scaling: {plan.scaling_strategy} | DB: {plan.requires_database}")
-        
-        # 2. Print rich analysis summary
+
+        self._print_analysis_summary(context)
+
         is_mono = "microservices" not in context.architecture
-        num_dockerfiles = len(context.microservice_dirs) if not is_mono else 1
-
-        dbs = context.databases if context.databases else {}
-
-        # Normalise: old cache stores lists, new stores {name: [svcs]}
-        def _norm(d):
-            if isinstance(d, list): return {k: [] for k in d}
-            if isinstance(d, dict): return d
-            return {}
-        rdbms_dict  = _norm(dbs.get("rdbms", {}))
-        cache_dict  = _norm(dbs.get("cache", {}))
-        nosql_dict  = _norm(dbs.get("nosql", {}))
-        broker_dict = _norm(dbs.get("broker", {}))
-
-        # Fallback legacy
-        if not rdbms_dict and "postgres" in context.architecture: rdbms_dict = {"PostgreSQL": []}
-        if not cache_dict  and "redis"    in context.architecture: cache_dict  = {"Redis": []}
-
-        # Service numbering map {svc -> "#N"}
-        svc_index = {svc: f"#{i+1}" for i, svc in enumerate(context.microservice_dirs)}
-
-        # Global port chain across all services in order
-        all_ports = []
-        for svc in context.microservice_dirs:
-            for p in context.microservice_details.get(svc, {}).get("ports", []):
-                if p not in all_ports:
-                    all_ports.append(p)
-
-        def _db_tag(svcs: list) -> str:
-            if not svcs: return ""
-            parts = [f"{svc_index.get(s, s)} {s}" for s in svcs]
-            return f"  ← {', '.join(parts)}"
-
-        W = 64
-        print("\n" + "=" * W)
-        print("  📋  CODE ANALYSIS SUMMARY")
-        print("=" * W)
-        print(f"  📁  Project       : {context.project_name}")
-        print(f"  🏛️   Architecture  : {'Microservices' if not is_mono else 'Monolith'}")
-        print(f"  🐳  Dockerfiles   : {num_dockerfiles} file(s) will be generated")
-        if all_ports:
-            chain = "  →  ".join(f":{p}" for p in all_ports)
-            print(f"  🔌  Port chain    : {chain}")
-        print()
-
-        # ── Per-service section ─────────────────────────────────────
-        if not is_mono and context.microservice_dirs:
-            print("  ── MICROSERVICES " + "─" * (W - 18))
-            for idx, svc in enumerate(context.microservice_dirs, start=1):
-                detail     = context.microservice_details.get(svc, {})
-                lang       = detail.get("language", "Node.js")
-                frameworks = detail.get("frameworks", [])
-                version    = detail.get("runtime_version", "?")
-                base_img   = detail.get("base_image", "node:20-alpine")
-                ports      = detail.get("ports", [])
-                key_deps   = detail.get("key_deps", [])
-                role       = detail.get("role", "Microservice")
-                svc_dbs    = detail.get("databases", [])
-
-                fw_str     = f" · {', '.join(frameworks)}" if frameworks else ""
-                port_chain = "  →  ".join([f":{p}" for p in ports]) if ports else "auto"
-
-                print(f"  #{idx}  {svc}/  —  {role}")
-                print(f"       Language    : {lang}{fw_str}")
-                print(f"       Runtime     : {lang} {version}")
-                print(f"       Base image  : {base_img}")
-                print(f"       Port chain  : {port_chain}")
-                if key_deps:
-                    print(f"       Key deps    : {', '.join(key_deps)}")
-                if svc_dbs:
-                    print(f"       Uses DBs    : {', '.join(svc_dbs)}")
-                print()
-
-        # ── Databases section ───────────────────────────────────────
-        has_db = rdbms_dict or cache_dict or nosql_dict or broker_dict
-        if has_db:
-            print("  ── DATABASES " + "─" * (W - 14))
-            for db_name, svcs in rdbms_dict.items():
-                print(f"  🗄️   RDBMS   {db_name:<22}{_db_tag(svcs)}")
-            for db_name, svcs in cache_dict.items():
-                print(f"  ⚡  Cache   {db_name:<22}{_db_tag(svcs)}")
-            for db_name, svcs in nosql_dict.items():
-                print(f"  🍃  NoSQL   {db_name:<22}{_db_tag(svcs)}")
-            for db_name, svcs in broker_dict.items():
-                print(f"  📨  Broker  {db_name:<22}{_db_tag(svcs)}")
-            print()
-
-        if context.env_vars:
-            print("  ── CONFIGURATION " + "─" * (W - 18))
-            shown = context.env_vars[:7]
-            print(f"  🔐  Env vars      : {', '.join(shown)}{' ...' if len(context.env_vars) > 7 else ''}")
-            print()
-
-        print("=" * W + "\n")
-
-
-        # 3. Discover and Isolate Contexts (Overhaul 1)
-        services = context.microservice_dirs
-        # Monolith fallback: ensure at least the root dir is processed for per-service stages
-        if is_mono and not services:
-            services = ["."]
+        services = context.microservice_dirs or (["."] if is_mono else [])
         if target_service:
             services = [target_service] if target_service in services else []
-            print(f"🎯 Target Service Filter: {target_service} (Found: {len(services) > 0})")
+            print(f"🎯 Target Service Filter: {target_service} (found: {bool(services)})")
 
-        per_service_contexts = {}
-        for svc in services:
-            print(f"🔍 Isolating Context: {svc}")
-            per_service_contexts[svc] = self._isolate_context(context, svc)
+        per_service_contexts = {
+            svc: self._isolate_context(context, svc, environment)
+            for svc in services
+        }
 
-        # 6. Run Stages (Level 10 Deterministic Sequence)
-        all_artifacts = {}
         stages = ["dockerfile", "docker_compose", "kubernetes", "github_actions"]
-        if gitops:
-            stages += ["gitops_manifests", "secrets_doc"]
-        else:
-            stages.append("cicd")
+        stages += ["gitops_manifests", "secrets_doc"] if gitops else ["cicd"]
 
+        all_artifacts: dict[str, str] = {}
         for stage in stages:
-            if stage in ["dockerfile", "github_actions", "kubernetes"]:
-                # Per-service execution (Fixes Overhaul 2)
+            if stage in _PER_SERVICE_STAGES:
                 for svc in services:
-                    try:
-                        svc_ctx = per_service_contexts[svc]
-                        res_files = self._execute_stage(f"{stage.replace('_', ' ')} ({svc})", stage, project_path, svc_ctx, plan, environment=environment, service_name=svc, no_prompts=no_prompts, no_heal=no_heal)
-                        if res_files:
-                            for f in res_files:
-                                all_artifacts[f.path] = f.content
-                    except Exception as e:
-                        logger.error(f"Stage {stage} for {svc} failed: {e}")
+                    files = self._run_stage(
+                        stage, project_path, per_service_contexts[svc],
+                        plan, environment, svc, no_prompts, no_heal,
+                    )
+                    all_artifacts.update({f.path: f.content for f in files})
             else:
-                # Project-wide execution (Compose, GitOps manifests, Secrets, CICD)
-                try:
-                    if stage == "gitops_manifests":
-                        resource_map = {}
-                        for svc in context.microservice_dirs:
-                            svc_ctx = per_service_contexts.get(svc)
-                            if svc_ctx and getattr(svc_ctx, "resources", None):
-                                resource_map[svc] = svc_ctx.resources
-                        setattr(context, "resource_profiles", resource_map)
-                        
-                    res_files = self._execute_stage(stage.replace("_", " "), stage, project_path, context, plan, environment=environment, no_prompts=no_prompts, no_heal=no_heal)
-                    if res_files:
-                        for f in res_files:
-                            all_artifacts[f.path] = f.content
-                except Exception as stage_e:
-                    # LLMs are mandatory. Do NOT write placeholder files — that
-                    # hides real failures behind plausible-looking output. Surface
-                    # the failure loudly and leave all_artifacts untouched so
-                    # downstream stages know this one is missing.
-                    logger.error("Stage %s failed: %s", stage, stage_e)
-                    logger.error("LLM EXHAUSTION for stage %s — no placeholder file written. Manual generation required.", stage)
-                    print(f"❌ LLM EXHAUSTION: Stage {stage} failed ({stage_e}). No placeholder file written. Manual generation required.")
-
-
-        # 7. Level 10 Post-Generation Stage (Audit & Manifest)
-        print("\n--- Stage 5: Global Integrity Audit ---")
-        from src.engine.integrity import IntegrityAuditor
-        from src.engine.graph import ArchitectureGraph
-        # Construct graph for audit
-
-        # FIX: ArchitectureGraph now accepts no-arg constructor
-        graph = ArchitectureGraph()           # ← was ArchitectureGraph() which crashed
-        for svc_dir in context.microservice_dirs:
-            p = context.microservice_details.get(svc_dir, {}).get("ports", ["8080"])[0]
-            graph.add_node(svc_dir, p)        # ← use the new incremental builder
-        
-        auditor = IntegrityAuditor(graph)
-        for path, content in all_artifacts.items():
-            auditor.add_artifact(path, content)
-        
-        findings = auditor.run_audit()
-        if findings:
-            print("🔍 Audit Findings:")
-            for sev, msg in findings:
-                print(f"  [{sev.name}] {msg}")
-        else:
-            print("✅ Integrity Audit Passed.")
-
-        from src.engine.secrets_manifest import SecretsManifest
-        SecretsManifest.generate(project_path, all_artifacts)
+                if stage == "gitops_manifests":
+                    setattr(context, "resource_profiles", {
+                        svc: per_service_contexts[svc].resources
+                        for svc in services
+                        if per_service_contexts[svc].resources
+                    })
+                files = self._run_stage(
+                    stage, project_path, context,
+                    plan, environment, None, no_prompts, no_heal,
+                )
+                all_artifacts.update({f.path: f.content for f in files})
 
         print("\n🎉 Pipeline Execution Completed Successfully!")
-        import os
-        for f in [".devops_context.json", ".devops_memory.json"]:
-            fpath = os.path.join(project_path, f)
-            if os.path.exists(fpath):
-                try: os.remove(fpath)
-                except Exception: pass
-        return
+        for name in [".devops_context.json", ".devops_memory.json"]:
+            fpath = os.path.join(project_path, name)
+            try:
+                os.remove(fpath)
+            except FileNotFoundError:
+                pass
 
-        
-    def _execute_stage(self, display_name: str, stage_key: str, project_path: str, context: ProjectContext, plan: ArchitecturePlan, environment: str = "dev", service_name: str = None, no_prompts: bool = False, no_heal: bool = False):
-        print(f"\n--- Stage: {display_name} ---")
-        
-        # 1. Load Prompts
-        # Mapping to the new "Elite" prompt structure
-        prompt_map = {
-            "dockerfile": ("docker", "docker_production"),
-            "kubernetes": ("k8s", "k8s_production"),
-            "cicd": ("cicd", "cicd_production"),
-            "scan": ("debug", "healer"), # Simplified
-            "docker_compose": ("docker", "docker_compose"),
-            "github_actions": ("cicd", "github_actions"),
-            "gitops_manifests": ("k8s", "argocd"),
-            "secrets_doc": ("docs", "secrets")
-        }
-        
-        prompt_dir, prompt_name = prompt_map.get(stage_key, (stage_key, "writer_a"))
-        
-        try:
-            template = load_prompt(prompt_dir, prompt_name)
-        except Exception as e:
-            logger.warning(f"Failed to load prompt {prompt_dir}/{prompt_name}: {e}. Falling back to elite defaults.")
-            # Final fallback to known elite prompts
-            if "docker" in stage_key: template = load_prompt("docker", "docker_production")
-            elif "k8s" in stage_key or "kubernetes" in stage_key or "gitops" in stage_key: template = load_prompt("k8s", "k8s_production")
-            elif "ci" in stage_key: template = load_prompt("cicd", "cicd_production")
-            else: raise FileNotFoundError(f"Could not find any prompt for stage: {stage_key}")
-            
-        # Optional User Input for K8s & Dockerfile
-        custom_instructions = ""
+    # ------------------------------------------------------------------ #
+    #  Stage runner — thin coordinator                                     #
+    # ------------------------------------------------------------------ #
 
-        if stage_key in ("kubernetes", "dockerfile"):
-            if stage_key == "kubernetes":
-                template += "\n\nCRITICAL: Output EACH Kubernetes resource (Deployment, Service, Ingress, Secrets, ConfigMap, Namespace etc.) in its OWN SEPARATE file using the FILENAME format: \nFILENAME: k8s/filename.yaml\n```yaml\n<content>\n```"
-                print("\n" + "="*50)
-                print("☸️   KUBERNETES MANIFEST CUSTOMIZATION")
-                print("="*50)
+    def _run_stage(
+        self,
+        stage_key: str,
+        project_path: str,
+        context: ProjectContext,
+        plan: ArchitecturePlan,
+        environment: str,
+        service_name: Optional[str],
+        no_prompts: bool,
+        no_heal: bool,
+    ) -> list[GeneratedFile]:
+        display = f"{stage_key.replace('_', ' ')} ({service_name})" if service_name else stage_key.replace("_", " ")
+        print(f"\n--- Stage: {display} ---")
 
-                # One-time global question for all K8s artifacts
-                ci = self._configure_customization(stage_key, display_name, no_prompts)
-                if ci:
-                    template += f"\n\nUSER CUSTOM INSTRUCTIONS (MUST FOLLOW):\n{ci}"
+        template = self._build_prompt(stage_key, context, plan, service_name, no_prompts)
 
-            if stage_key == "dockerfile" and len(context.microservice_dirs) > 0:
-                dirs = ", ".join(context.microservice_dirs)
-                template += (
-                    f"\n\nCRITICAL: Automatically output EACH Dockerfile in its respective "
-                    f"directory using the FILENAME format (e.g., frontend/Dockerfile, backend/Dockerfile). "
-                    f"These are the required directories to cover: {dirs}\n"
-                    "FILENAME: <dir>/Dockerfile\n```dockerfile\n<content>\n```"
-                )
-            
-        # 2. Generate Drafts (Parallel)
         svc = service_name or getattr(context, "project_name", "unknown")
-        
         prompt_context = {
-            "context": context.raw_context_summary,
+            "context":      context.raw_context_summary,
             "plan_summary": str(plan),
-            # Expose both names so all templates work unconditionally:
-            "svc_name": svc,
+            "svc_name":     svc,
             "service_name": svc,
             "project_name": getattr(context, "project_name", svc),
+            "language":     context.language,
+            "resources":    str(context.resources) if context.resources else "",
+            "service_path": getattr(context, "service_path", ""),
         }
-        # Add specific fields
-        prompt_context.update(context.model_dump())
-        
-        # --- Level 10 Deterministic Looping (Gap 4) ---
-        if stage_key == "dockerfile" and context.microservice_dirs:
-            dirs_str = "\n".join([f"- {d}" for d in context.microservice_dirs])
-            template += f"\n\nCRITICAL: Generate a separate Dockerfile for EACH of these {len(context.microservice_dirs)} services:\n{dirs_str}\nUse FILENAME: <dir>/Dockerfile for each."
-        
-        if stage_key == "docker_compose" and context.microservice_dirs:
-            svc_details = []
-            for d in context.microservice_dirs:
-                det = context.microservice_details.get(d, {})
-                ports = det.get('ports', ['8080'])
-                db_req = det.get('databases', [])
-                svc_details.append(f"- {d}: ports {ports}, databases: {db_req}")
-            
-            svc_str = "\n".join(svc_details)
-            template += f"\n\nCRITICAL: Generate docker-compose.yml listing ALL {len(context.microservice_dirs)} services explicitly:\n{svc_str}\nInclude postgres and redis if referenced. Do NOT merge them. Each service MUST have its own block under `services:`. Use FILENAME: docker-compose.yml"
 
-        if stage_key == "kubernetes" and context.microservice_dirs:
-            svc_str = ", ".join(context.microservice_dirs)
-            template += (
-                f"\n\nCRITICAL: Generate K8s manifests for ALL services: {svc_str}.\n"
-                "Include Namespace, Service, Deployment, HPA, PodDisruptionBudget, "
-                "and NetworkPolicy as separate files.\n"
-                "For HPA use apiVersion: autoscaling/v2 with spec.scaleTargetRef.name "
-                "matching the Deployment name. DO NOT put 'selector' in spec root of HPA.\n"
-                "Use FILENAME: k8s/<svc>/<file>.yaml format."
-            )
-            
-        if stage_key == "kubernetes" and getattr(context, "resources", None):
-            template += (
-                f"\n\nCRITICAL: Use these container resources exactly:\n"
-                f"requests.cpu: {context.resources.get('cpu_req', '250m')}\n"
-                f"requests.memory: {context.resources.get('mem_req', '256Mi')}\n"
-                f"limits.cpu: {context.resources.get('cpu_lim', '500m')}\n"
-                f"limits.memory: {context.resources.get('mem_lim', '512Mi')}\n"
-            )
-
-        if stage_key == "gitops_manifests" and getattr(context, "resource_profiles", None):
-            import json
-            rp_str = json.dumps(context.resource_profiles, indent=2)
-            template += (
-                f"\n\nCRITICAL: Use the provided JSON map `resource_profiles` to set exact resource limits/requests for each service:\n"
-                f"```json\n{rp_str}\n```\n"
-                "Do NOT invent or hallucinate values. Map them precisely."
-            )
-
-
-        
-        candidates = []
-        # Sequential execution — Ollama processes requests one at a time;
-        # parallel calls just queue up and timeout on 8 GB RAM machines.
+        candidates: list[InfraSpec] = []
         for g in self.generators:
             try:
                 candidates.append(g.generate(template, prompt_context, task_type=stage_key))
             except Exception as e:
-                logger.error(f"Generator failed: {e}")
+                logger.error("Generator failed for stage %s: %s", stage_key, e)
 
-        # Filter out empty/trivial candidates. When all LLM providers fail or return
-        # empty content, LLMGenerator.generate() returns an InfraSpec with
-        # file_content="" and a generic model_name. Without this filter the evaluator
-        # would pick the empty candidate and we'd write a 0-byte file to disk.
         candidates = [c for c in candidates if c.file_content and len(c.file_content.strip()) > 50]
-
         if not candidates:
-            logger.error(f"Stage {display_name} failed: all LLM providers returned empty output.")
-            print(f"❌ Stage {display_name} failed: all LLM providers returned empty output.")
-            return
+            logger.error("Stage %s: all generators returned empty output", display)
+            print(f"❌ Stage {display} failed: all generators returned empty output.")
+            return []
 
-        # 3. Score & Select
-        # TODO: Objective Static Analysis Roadmap
-        # Currently, the Evaluator relies on the LLM's self-reported scores and length heuristics.
-        # To make this fully deterministic, the future roadmap includes wiring real CLI linters:
-        # 1. Run `hadolint` (Docker) or `kubeconform` (K8s) on `c.file_content` via a secure subprocess.
-        # 2. Parse the exit code or JSON output to quantify real technical debt.
-        # 3. Pipe those integers directly into python `scorecard.py` to drive true objective selection.
-        # For now, we inject a semantic "Grader" heuristic here.
+        self._score_candidates(candidates, stage_key)
+        best_spec, best_score = self.evaluator.evaluate_candidates(candidates)
+        print(f"🏆 Selected from {best_spec.model_name} (score: {best_score:.1f})")
+
+        policy_engine = PolicyEngine(
+            ProjectModel(project_name=context.project_name, services=[], environment=environment)
+        )
+
+        return self._validate_and_write(
+            best_spec.file_content, stage_key, project_path,
+            environment, service_name, policy_engine, no_heal,
+        )
+
+    # ------------------------------------------------------------------ #
+    #  1. Prompt assembly — pure, no side effects, fully testable          #
+    # ------------------------------------------------------------------ #
+
+    def _build_prompt(
+        self,
+        stage_key: str,
+        context: ProjectContext,
+        plan: ArchitecturePlan,
+        service_name: Optional[str],
+        no_prompts: bool,
+    ) -> str:
+        prompt_dir, prompt_name = _PROMPT_MAP.get(stage_key, (stage_key, "writer_a"))
+        try:
+            template = load_prompt(prompt_dir, prompt_name)
+        except Exception as e:
+            logger.warning("Prompt %s/%s not found (%s), falling back", prompt_dir, prompt_name, e)
+            if "docker" in stage_key:
+                template = load_prompt("docker", "docker_production")
+            elif any(k in stage_key for k in ("k8s", "kubernetes", "gitops")):
+                template = load_prompt("k8s", "k8s_production")
+            elif "ci" in stage_key:
+                template = load_prompt("cicd", "cicd_production")
+            else:
+                raise FileNotFoundError(f"No prompt found for stage: {stage_key!r}") from e
+
+        # --- Stage-specific prompt augmentations ---
+
+        if stage_key == "kubernetes":
+            template += (
+                "\n\nCRITICAL: Output EACH Kubernetes resource in its OWN SEPARATE file:\n"
+                "FILENAME: k8s/filename.yaml\n```yaml\n<content>\n```"
+            )
+            ci = self._configure_customization(stage_key, no_prompts)
+            if ci:
+                template += f"\n\nUSER CUSTOM INSTRUCTIONS (MUST FOLLOW):\n{ci}"
+
+        if stage_key == "dockerfile" and context.microservice_dirs:
+            dirs = ", ".join(context.microservice_dirs)
+            template += (
+                f"\n\nCRITICAL: Generate a separate Dockerfile for EACH directory: {dirs}\n"
+                "FILENAME: <dir>/Dockerfile\n```dockerfile\n<content>\n```"
+            )
+
+        if stage_key == "docker_compose" and context.microservice_dirs:
+            svc_lines = "\n".join(
+                f"- {d}: ports {context.microservice_details.get(d, {}).get('ports', ['8080'])}, "
+                f"databases: {context.microservice_details.get(d, {}).get('databases', [])}"
+                for d in context.microservice_dirs
+            )
+            template += (
+                f"\n\nCRITICAL: Generate docker-compose.yml for ALL {len(context.microservice_dirs)} services:\n"
+                f"{svc_lines}\nUse FILENAME: docker-compose.yml"
+            )
+
+        if stage_key == "kubernetes" and context.microservice_dirs:
+            template += (
+                f"\n\nCRITICAL: Generate K8s manifests for ALL services: {', '.join(context.microservice_dirs)}.\n"
+                "Include Namespace, Service, Deployment, HPA, PodDisruptionBudget, NetworkPolicy.\n"
+                "For HPA use apiVersion: autoscaling/v2. DO NOT put 'selector' in HPA spec root.\n"
+                "Use FILENAME: k8s/<svc>/<file>.yaml format."
+            )
+
+        if stage_key == "kubernetes" and context.resources:
+            r = context.resources
+            template += (
+                f"\n\nCRITICAL: Use these container resources exactly:\n"
+                f"requests.cpu: {r.get('cpu_req', '250m')}\n"
+                f"requests.memory: {r.get('mem_req', '256Mi')}\n"
+                f"limits.cpu: {r.get('cpu_lim', '500m')}\n"
+                f"limits.memory: {r.get('mem_lim', '512Mi')}\n"
+            )
+
+        if stage_key == "gitops_manifests" and getattr(context, "resource_profiles", None):
+            rp_str = json.dumps(context.resource_profiles, indent=2)
+            template += (
+                f"\n\nCRITICAL: Use this resource_profiles map for exact limits/requests:\n"
+                f"```json\n{rp_str}\n```\nDo NOT invent values."
+            )
+
+        return template
+
+    # ------------------------------------------------------------------ #
+    #  2. Candidate scoring — heuristic, mutates scores in-place           #
+    # ------------------------------------------------------------------ #
+
+    def _score_candidates(self, candidates: list[InfraSpec], stage_key: str) -> None:
         for c in candidates:
             content = c.file_content.lower()
-            # --- Security & Quality heuristics (0-100) ---
-            score = 50  # base
-            
-            # Docker specific
+            score = 50
+
             if stage_key == "dockerfile":
-                if "from " in content and " as " in content:
-                    score += 15  # multi-stage build reward
-                if any(u in content for u in ["user appuser", "user appuser", "runuser"]):
-                    score += 15  # non-root user
-                if "healthcheck" in content:
-                    score += 10  # healthcheck presence
-                if "pip install" in content or "npm ci" in content or "cargo build" in content or "go build" in content or "mvn package" in content or "gradle build" in content:
-                    score += 5   # language-agnostic optimized build/install
-                if ":latest" not in content:
-                    score += 5   # pinned versions
-            
-            # Kubernetes specific
+                if "from " in content and " as " in content: score += 15
+                if any(u in content for u in ["user appuser", "runuser"]):  score += 15
+                if "healthcheck" in content:                                 score += 10
+                if any(b in content for b in ["npm ci", "pip install", "go build", "mvn package"]): score += 5
+                if ":latest" not in content:                                 score += 5
             elif stage_key == "kubernetes":
-                if "hpa" in content: score += 10
-                if "networkpolicy" in content: score += 10
-                if "poddisruptionbudget" in content: score += 5
-                if "requests:" in content and "limits:" in content: score += 15
+                if "hpa" in content:                                         score += 10
+                if "networkpolicy" in content:                               score += 10
+                if "poddisruptionbudget" in content:                         score += 5
+                if "requests:" in content and "limits:" in content:          score += 15
                 if "livenessprobe" in content and "readinessprobe" in content: score += 10
-            
-            # CI/CD specific (including per-service github_actions)
-            elif stage_key in ["cicd", "github_actions"]:
-                if "trivy" in content or "gitleaks" in content or "sonar" in content:
-                    score += 20  # integrated security scans
-                if "permissions:" in content:
-                    score += 10  # explicit permissions
-                if "needs:" in content:
-                    score += 5   # job dependencies
-                if "docker/build-push-action@v6" in content:
-                    score += 5   # proper docker build/push
-                if "sed -i" in content and "deployment.yaml" in content:
-                    score += 5   # manifest image-tag update pattern
-            
-            # Penalties
-            if "privileged: true" in content:
-                score -= 30
-            if "copy . env" in content or "env_file:" in content:
-                # Potential secret exposure (rough check)
-                score -= 10
+            elif stage_key in ("cicd", "github_actions"):
+                if any(t in content for t in ["trivy", "gitleaks", "sonar"]): score += 20
+                if "permissions:" in content:                                score += 10
+                if "needs:" in content:                                      score += 5
+
+            if "privileged: true" in content: score -= 30
+            if "env_file:" in content:        score -= 10
 
             c.security_score = min(100, max(0, score))
-            c.compliance_score = c.security_score # Tie them for now
 
-            # --- Best-practice heuristics (0-100) ---
-            bp = 60  # base
-            if "as builder" in content:
-                bp += 15  # multi-stage build
-            if "workdir" in content:
-                bp += 10  # WORKDIR used
-            if 'cmd ["' in content or "cmd ['":
-                bp += 10  # exec form CMD
-            if "label org.opencontainers" in content or "label maintainer" in content:
-                bp += 5   # OCI labels
+            bp = 60
+            if "as builder" in content:                                      bp += 15
+            if "workdir" in content:                                         bp += 10
+            if 'cmd ["' in content:                                          bp += 10
+            if "label org.opencontainers" in content:                        bp += 5
             c.best_practice_score = min(100, bp)
 
-        # Model agreement score: ratio of generators that returned useful content
-        useful = sum(1 for c in candidates if len(c.file_content.strip()) > 100)
-        model_agreement = useful / max(len(candidates), 1)
+    # ------------------------------------------------------------------ #
+    #  3. Validate + heal + write — testable with mock GeneratedFile list  #
+    # ------------------------------------------------------------------ #
 
-        if not candidates:
-            print("❌ All generators failed.")
-            return
+    def _validate_and_write(
+        self,
+        content: str,
+        stage_key: str,
+        project_path: str,
+        environment: str,
+        service_name: Optional[str],
+        policy_engine: PolicyEngine,
+        no_heal: bool,
+    ) -> list[GeneratedFile]:
+        art_mgr = ArtifactManager(project_path, environment)
 
-        best_spec, best_score = self.evaluator.evaluate_candidates(candidates)
-        print(f"🏆 Selected Draft from {best_spec.model_name} (Score: {best_score:.1f})")
-        
-        # 4. Level 10 Validation & Policy Engine
-        from src.engine.policy_engine import PolicyEngine
-        from src.models.domain import ProjectModel
-        # Basic model for policy
-        policy_model = ProjectModel(project_name=context.project_name, services=[], environment=environment)
-        policy_engine = PolicyEngine(policy_model)
-        print(f"验证: {best_spec.model_name} draft...")
-        
-        final_content = best_spec.file_content
-        
-        # Determine if we need to split multifile
-        if stage_key in ["dockerfile", "kubernetes", "docker_compose", "cicd", "github_actions", "gitops_manifests", "secrets_doc"]:
-            import re
-            pattern = r"FILENAME: (.*?)\n```(?:\w+)?\n(.*?)```"
-            matches = re.findall(pattern, final_content, re.DOTALL)
-            
-            if matches:
-                processed_files = []
-                from src.engine.artifact_manager import ArtifactManager
-                from src.engine.severity import Severity
-                art_mgr = ArtifactManager(project_path, environment)
-                
-                for rel_path, f_content in matches:
-                    rel_path = rel_path.strip()
-                    # ─── New Tiered Output Structure (Overhaul 10) ──────────
-                    if service_name:
-                        rel_path = os.path.normpath(f"outputs/per-service/{service_name}/{rel_path}")
-                    elif stage_key == "docker_compose":
-                        rel_path = f"outputs/shared/{rel_path}"
-                    elif stage_key == "gitops_manifests":
-                        # Strip redundant 'gitops/' prefix if prompt generated it (Phase 3 Polish)
-                        clean_path = rel_path[7:] if rel_path.startswith("gitops/") else rel_path
-                        # Map directly to the canonical gitops-repo layout (Phase 5 Polish)
-                        rel_path = f"gitops-repo/{clean_path}"
-                    else:
-                        rel_path = f"outputs/docs/{rel_path}" if "doc" in stage_key else f"outputs/shared/{rel_path}"
-                        
-                    # ← BUG FIX: guard against LLM embedding YAML in filename token
-                    if len(rel_path) > 255 or "\n" in rel_path:
-                        logger.warning(
-                            f"Skipping malformed FILENAME token ({len(rel_path)} chars)"
-                        )
-                        continue
-                    gen_file = GeneratedFile(path=rel_path, content=f_content.strip())
-                    val_res = self.validator.validate(gen_file)
-                    
-                    # Policy Checks
-                    policy_findings = policy_engine.validate_artifact(rel_path, f_content)
-                    if policy_findings:
-                        val_res.passed = False
-                        val_res.errors.extend([f"POLICY: {msg}" for sev, msg in policy_findings])
-
-                    if not no_heal and not val_res.passed:
-                        print(f"  [!] Validation failed for {rel_path}. Healing...")
-                        gen_file = self.healer.heal(gen_file, val_res.errors)
-                        # Final re-validate
-                        val_res = self.validator.validate(gen_file)
-                    
-                    # Level 10 Write Gate
-                    # CRITICAL = never write, HIGH = prod blocker, MEDIUM = healed-but-imperfect, LOW = clean
-                    if not val_res.passed:
-                        sev = Severity.MEDIUM  # healer ran but file still has minor issues — write it
-                    else:
-                        sev = Severity.LOW
-                    art_mgr.write_gate(gen_file.path, gen_file.content, sev)
-                    processed_files.append(gen_file)
-
-                # --- V2 Automated PR Integration (Final Form 12) ---
-                if self.publisher and stage_key in ["github_actions", "gitops_manifests"]:
-                    try:
-                        pub_files = {f.path: f.content for f in processed_files}
-                        self.publisher.publish(
-                            files=pub_files,
-                            stage=stage_key,
-                            run_id=getattr(self, "run_id", "v2-auto"),
-                            reasoning=f"V2 Orchestrator automated {stage_key} generation",
-                            project_path=project_path
-                        )
-                    except Exception as pe:
-                        logger.error(f"V2 Publisher failed: {pe}")
-                return processed_files
-            else:
-                # BUG FIX: fix the cicd/k8s fallback filenames
-                # Handle monolith root service_name (".") gracefully for per-service stages
-                _svc_name = service_name if service_name and service_name != "." else "service"
-                filename_map = {
-                    "cicd":            ".github/workflows/ci.yml",
-                    "github_actions":  f".github/workflows/{_svc_name}-ci.yml",
-                    "docker_compose":  "docker-compose.yml",
-                    "dockerfile":      "Dockerfile",
-                    "kubernetes":      "k8s/manifests.yaml",
-                    "gitops_manifests":"applicationset.yaml",
-                    "secrets_doc":     "docs/secrets.md",
-                }
-                filename = filename_map.get(stage_key, "generated_file")
-                
-                # ─── New Tiered Output Structure (Overhaul 10) ──────────
-                if service_name:
-                    filename = os.path.normpath(f"outputs/per-service/{service_name}/{filename}")
-                elif stage_key == "docker_compose":
-                    filename = f"outputs/shared/{filename}"
-                elif stage_key == "gitops_manifests":
-                    # Even fallback ApplicationSet should live in gitops-repo for ArgoCD to watch
-                    filename = f"gitops-repo/argocd/{filename}"
-                else:
-                    filename = f"outputs/docs/{filename}" if "doc" in stage_key else f"outputs/shared/{filename}"
-                
-                gen_file = GeneratedFile(path=filename, content=final_content)
-                val_res = self.validator.validate(gen_file)
-                
-                # Policy Checks
-                policy_findings = policy_engine.validate_artifact(filename, final_content)
-                if policy_findings:
-                    val_res.passed = False
-                    val_res.errors.extend([f"POLICY: {msg}" for sev, msg in policy_findings])
-
-                if not no_heal and not val_res.passed:
-                    gen_file = self.healer.heal(gen_file, val_res.errors)
-                
-                from src.engine.artifact_manager import ArtifactManager
-                from src.engine.severity import Severity
-                art_mgr = ArtifactManager(project_path, environment)
-                sev = Severity.MEDIUM if not val_res.passed else Severity.LOW
-                art_mgr.write_gate(gen_file.path, gen_file.content, sev)
-                print(f"✅ Processed {filename}")
-                return [gen_file]
-        else:
-            # Legacy fallback single file (e.g. cicd if not in multi-list above)
-            return []
-        
-        # Memory removed
-
-    def _write_files_direct(self, files: list[GeneratedFile], project_path: str):
-        import os
-        print("📦 Writing Validated Config Files:")
-        for f in files:
-            full_path = os.path.join(project_path, f.path)
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            with open(full_path, "w") as out:
-                out.write(f.content)
-            print(f"  - Created {f.path}")
-
-    def _handle_multifile_output(self, content: str, project_path: str):
-        """Helper to parse FILENAME: blocks and write them."""
-        import re
-        import os
-        
+        # Parse FILENAME: blocks; fall back to single-file if none found
         pattern = r"FILENAME: (.*?)\n```(?:\w+)?\n(.*?)```"
         matches = re.findall(pattern, content, re.DOTALL)
-        
-        if matches:
-            print("📦 Writing Multiple Config Files:")
-            for rel_path, file_content in matches:
-                rel_path = rel_path.strip()
-                full_path = os.path.join(project_path, rel_path)
-                os.makedirs(os.path.dirname(full_path), exist_ok=True)
-                write_file(full_path, file_content.strip())
-                print(f"  - Created {rel_path}")
+
+        if not matches:
+            raw_name = _FALLBACK_FILENAMES.get(stage_key, "generated_file")
+            rel_path = self._output_path(raw_name, stage_key, service_name)
+            matches = [(rel_path, content)]
+            single_file = True
         else:
-            print("⚠️ No referenced files found in content. Dumping raw to 'scan_configs.md'")
-            write_file(os.path.join(project_path, "scan_configs.md"), content)
+            single_file = False
 
-    def _configure_customization(self, stage_key: str, display_name: str, no_prompts: bool) -> str:
-        """
-        Global customization helper.
+        processed: list[GeneratedFile] = []
+        for raw_path, file_content in matches:
+            rel_path = raw_path.strip() if single_file else self._output_path(raw_path.strip(), stage_key, service_name)
 
-        - Asks once for Kubernetes (and can be reused for others later).
-        - Returns a custom instructions string to append to the prompt template,
-          or "" if running fully self-analysed.
-        """
-        # If running in fully non-interactive mode, never ask.
+            if len(rel_path) > 255 or "\n" in rel_path:
+                logger.warning("Skipping malformed FILENAME token (%d chars)", len(rel_path))
+                continue
+
+            gen_file = GeneratedFile(path=rel_path, content=file_content.strip())
+            val_res = self.validator.validate(gen_file)
+
+            policy_findings = policy_engine.validate_artifact(rel_path, file_content)
+            if policy_findings:
+                val_res.passed = False
+                val_res.errors.extend([f"POLICY: {msg}" for _, msg in policy_findings])
+
+            if not no_heal and not val_res.passed:
+                print(f"  [!] Validation failed for {rel_path} — healing...")
+                gen_file = self.healer.heal(gen_file, val_res.errors)
+                val_res = self.validator.validate(gen_file)
+
+            sev = Severity.LOW if val_res.passed else Severity.MEDIUM
+            art_mgr.write_gate(gen_file.path, gen_file.content, sev)
+            processed.append(gen_file)
+
+        if self.publisher and stage_key in ("github_actions", "gitops_manifests") and processed:
+            try:
+                self.publisher.publish(
+                    files={f.path: f.content for f in processed},
+                    stage=stage_key,
+                    run_id=getattr(self, "run_id", "v2-auto"),
+                    reasoning=f"devops-agent automated {stage_key} generation",
+                    project_path=project_path,
+                )
+            except Exception as e:
+                logger.error("Publisher failed: %s", e)
+
+        return processed
+
+    # ------------------------------------------------------------------ #
+    #  Helpers                                                             #
+    # ------------------------------------------------------------------ #
+
+    def _output_path(self, rel_path: str, stage_key: str, service_name: Optional[str]) -> str:
+        """Map a raw relative path to the tiered outputs/ layout."""
+        import re
+        def _sanitize(value: str) -> str:
+            return re.sub(r'[^a-zA-Z0-9._\-]', '_', os.path.basename(os.path.normpath(value)))
+
+        safe_rel = _sanitize(rel_path)
+        if service_name:
+            safe_svc = _sanitize(service_name)
+            return os.path.normpath(f"outputs/per-service/{safe_svc}/{safe_rel}")
+        if stage_key == "docker_compose":
+            return f"outputs/shared/{safe_rel}"
+        if stage_key == "gitops_manifests":
+            clean = rel_path[7:] if rel_path.startswith("gitops/") else rel_path
+            return f"gitops-repo/{_sanitize(clean)}"
+        if "doc" in stage_key:
+            return f"outputs/docs/{safe_rel}"
+        return f"outputs/shared/{safe_rel}"
+
+    def _configure_customization(self, stage_key: str, no_prompts: bool) -> str:
+        """Return custom instructions string for K8s stage, or '' in non-interactive mode."""
         if no_prompts:
             self._custom_prompt_initialized = True
-            self._custom_prompt_mode = "none"
             return ""
-
-        # For now, only gate on first Kubernetes run; you can reuse for others by
-        # removing the stage_key guard.
         if stage_key != "kubernetes":
-            # For non-K8s stages, reuse previously-decided mode/text if any.
-            return self._custom_prompt_text or ""
-
+            return self._custom_prompt_text
         if self._custom_prompt_initialized:
-            return self._custom_prompt_text or ""
+            return self._custom_prompt_text
 
-        # Ask once, y/n with default "n"
         ans = input("Would you like to customize Kubernetes manifests? [y/n]: ").strip().lower()
         if ans not in ("y", "yes"):
-            # User said "n" or pressed Enter → never ask again
             self._custom_prompt_initialized = True
-            self._custom_prompt_mode = "none"
             self._custom_prompt_text = ""
             return ""
 
-        # User opted in → choose how to provide instructions
         print("\nKubernetes customization options:")
         print("  1. Provide a path to a file with instructions")
         print("  2. Answer a short set of questions now")
@@ -702,134 +443,173 @@ class V2Orchestrator:
             try:
                 from src.tools.file_ops import read_file
                 custom = read_file(filepath)
-                self._custom_prompt_mode = "file"
             except Exception as e:
                 print(f"Failed to read file: {e}")
-                custom = ""
-                self._custom_prompt_mode = "none"
         else:
-            # Simple Q&A to derive structured instructions
-            print("\nAnswer a few questions to guide Kubernetes generation:")
-            ns = input("Namespace to use (default 'default'): ").strip() or "default"
-            domain = input("Ingress host/domain (leave blank for no ingress): ").strip()
-            env = input("Environment label (dev/staging/prod, default 'dev'): ").strip() or "dev"
-
-            lines = [
-                f"- Use namespace: {ns}",
-                f"- Environment label: {env}",
-            ]
+            ns     = input("Namespace (default 'default'): ").strip() or "default"
+            domain = input("Ingress host/domain (blank = no ingress): ").strip()
+            env    = input("Environment label (default 'dev'): ").strip() or "dev"
+            lines  = [f"- Use namespace: {ns}", f"- Environment label: {env}"]
             if domain:
                 lines.append(f"- Expose HTTP ingress at host: {domain}")
             lines.append("- Use resource limits exactly as provided in resource_profiles where available.")
             custom = "KUBERNETES CUSTOMIZATION:\n" + "\n".join(lines)
-            self._custom_prompt_mode = "qa"
 
         self._custom_prompt_initialized = True
         self._custom_prompt_text = custom.strip()
         return self._custom_prompt_text
 
-    def _isolate_context(self, base_context: ProjectContext, service_name: str) -> ProjectContext:
-        """Creates a service-specific context with dedicated resource profiles."""
-        import copy
+    def _isolate_context(self, base_context: ProjectContext, service_name: str, environment: str = "dev") -> ProjectContext:
+        """Return a deep-copied context scoped to one service with its resource profile."""
+        from src.config.settings import RESOURCE_PROFILES
+
         ctx = copy.deepcopy(base_context)
-        
-        # Filter details for ONLY this service
         svc_detail = base_context.microservice_details.get(service_name, {})
-        
-        # NEW restriction: explicitly isolate array paths to prevent LLM global leakage
+
         ctx.microservice_dirs = [service_name]
         ctx.microservice_details = {service_name: svc_detail}
-        
-        svc_type = svc_detail.get("language", "unknown").lower()
-        fw_lower = str(svc_detail.get("frameworks", [])).lower()
-        base_img = str(svc_detail.get("base_image", "")).lower()
-
-        if "spring boot" in fw_lower:
-            svc_type = "java-spring-boot"
-        elif "fastapi" in fw_lower:
-            svc_type = "python-fastapi"
-        elif "react" in fw_lower or "nginx" in base_img:
-            svc_type = "react-nginx"
-        elif "express" in fw_lower or "nestjs" in fw_lower or "node" in svc_type:
-            svc_type = "node-express"
-            
-        # Dynamic Resource Allocation (Overhaul 4)
-        RESOURCE_PROFILES = {
-            'java-spring-boot': {'cpu_req': '250m', 'cpu_lim': '500m', 'mem_req': '512Mi', 'mem_lim': '1Gi'},
-            'python-fastapi':   {'cpu_req': '100m', 'cpu_lim': '300m', 'mem_req': '256Mi', 'mem_lim': '512Mi'},
-            'react-nginx':      {'cpu_req': '50m',  'cpu_lim': '250m', 'mem_req': '128Mi', 'mem_lim': '512Mi'},
-            'node-express':     {'cpu_req': '100m', 'cpu_lim': '300m', 'mem_req': '256Mi', 'mem_lim': '512Mi'},
-            'default':          {'cpu_req': '100m', 'cpu_lim': '200m', 'mem_req': '128Mi', 'mem_lim': '256Mi'},
-        }
-        
-        profile = RESOURCE_PROFILES.get(svc_type, RESOURCE_PROFILES['default'])
-        
-        # Inject into context (Dynamic Resource Logic)
         ctx.project_name = service_name
         ctx.language = svc_detail.get("language", "unknown")
         ctx.ports = svc_detail.get("ports", ["8080"])
         ctx.frameworks = svc_detail.get("frameworks", [])
-        
-        # Add a custom 'metadata' field for resource profiles
-        ctx.service_path = svc_detail.get("path", service_name)   # ensure analysis fills 'path'
-        ctx.resources = profile
-        
-        # TRUNCATE to ~12000 chars to avoid llama.cpp context overflow!
-        truncated_context = ctx.raw_context_summary[:12000]
+        ctx.service_path = svc_detail.get("path", service_name)
+
+        fw_lower  = str(svc_detail.get("frameworks", [])).lower()
+        base_img  = str(svc_detail.get("base_image", "")).lower()
+        svc_type  = svc_detail.get("language", "unknown").lower()
+        if "spring boot" in fw_lower:                          svc_type = "java-spring-boot"
+        elif "fastapi" in fw_lower:                            svc_type = "python-fastapi"
+        elif "react" in fw_lower or "nginx" in base_img:       svc_type = "react-nginx"
+        elif "express" in fw_lower or "nestjs" in fw_lower or "node" in svc_type:
+                                                               svc_type = "node-express"
+
+        env_profiles = RESOURCE_PROFILES.get("environments", {})
+        ctx.resources = (
+            env_profiles.get(environment, {}).get(svc_type)
+            or env_profiles.get(environment, {}).get("default")
+            or {"cpu_req": "100m", "cpu_lim": "500m", "mem_req": "128Mi", "mem_lim": "512Mi", "replicas": 1}
+        )
+
+        truncated = ctx.raw_context_summary[:12000]
         if len(ctx.raw_context_summary) > 12000:
-            truncated_context += "\n...[TRUNCATED TO PREVENT CONTEXT OVERFLOW]..."
-            
-        ctx.raw_context_summary = f"Isolated Context for {service_name}\nResources: {profile}\nOriginal context follows:\n{truncated_context}"
-        
+            truncated += "\n...[TRUNCATED]..."
+        ctx.raw_context_summary = (
+            f"Isolated Context for {service_name}\nResources: {ctx.resources}\n"
+            f"Original context follows:\n{truncated}"
+        )
         return ctx
 
-    def _setup_gitops_repo(self, project_path: str, repo_url: str):
-        """Detects or initializes GitOps repository structure (Overhaul 6 & 12)."""
-        import os
-        import subprocess
-        gitops_dir = os.path.join(project_path, "gitops-repo")
-        
-        # 1. Handle Remote Cloning
+    def _print_analysis_summary(self, context: ProjectContext) -> None:
+        is_mono = "microservices" not in context.architecture
+        dbs = context.databases or {}
+
+        def _norm(d):
+            if isinstance(d, list): return {k: [] for k in d}
+            if isinstance(d, dict): return d
+            return {}
+
+        rdbms  = _norm(dbs.get("rdbms", {}))
+        cache  = _norm(dbs.get("cache", {}))
+        nosql  = _norm(dbs.get("nosql", {}))
+        broker = _norm(dbs.get("broker", {}))
+        if not rdbms and "postgres" in context.architecture: rdbms = {"PostgreSQL": []}
+        if not cache  and "redis"    in context.architecture: cache = {"Redis": []}
+
+        svc_index = {s: f"#{i+1}" for i, s in enumerate(context.microservice_dirs)}
+
+        def _db_tag(svcs: list) -> str:
+            if not svcs: return ""
+            return "  ← " + ", ".join(f"{svc_index.get(s, s)} {s}" for s in svcs)
+
+        W = 64
+        print("\n" + "=" * W)
+        print("  📋  CODE ANALYSIS SUMMARY")
+        print("=" * W)
+        print(f"  📁  Project       : {context.project_name}")
+        print(f"  🏛️   Architecture  : {'Microservices' if not is_mono else 'Monolith'}")
+        print(f"  🐳  Dockerfiles   : {len(context.microservice_dirs) if not is_mono else 1} file(s) will be generated")
+
+        all_ports = [
+            p for svc in context.microservice_dirs
+            for p in context.microservice_details.get(svc, {}).get("ports", [])
+        ]
+        if all_ports:
+            print(f"  🔌  Port chain    : {'  →  '.join(f':{p}' for p in dict.fromkeys(all_ports))}")
+        print()
+
+        if not is_mono and context.microservice_dirs:
+            print("  ── MICROSERVICES " + "─" * (W - 18))
+            for idx, svc in enumerate(context.microservice_dirs, start=1):
+                d = context.microservice_details.get(svc, {})
+                fw_str = f" · {', '.join(d.get('frameworks', []))}" if d.get("frameworks") else ""
+                ports  = d.get("ports", [])
+                print(f"  #{idx}  {svc}/  —  {d.get('role', 'Microservice')}")
+                print(f"       Language    : {d.get('language', 'Node.js')}{fw_str}")
+                print(f"       Base image  : {d.get('base_image', 'node:20-alpine')}")
+                print(f"       Port chain  : {'  →  '.join(f':{p}' for p in ports) or 'auto'}")
+                if d.get("key_deps"):
+                    print(f"       Key deps    : {', '.join(d['key_deps'])}")
+                if d.get("databases"):
+                    print(f"       Uses DBs    : {', '.join(d['databases'])}")
+                print()
+
+        if rdbms or cache or nosql or broker:
+            print("  ── DATABASES " + "─" * (W - 14))
+            for n, s in rdbms.items():  print(f"  🗄️   RDBMS   {n:<22}{_db_tag(s)}")
+            for n, s in cache.items():  print(f"  ⚡  Cache   {n:<22}{_db_tag(s)}")
+            for n, s in nosql.items():  print(f"  🍃  NoSQL   {n:<22}{_db_tag(s)}")
+            for n, s in broker.items(): print(f"  📨  Broker  {n:<22}{_db_tag(s)}")
+            print()
+
+        if context.env_vars:
+            shown = context.env_vars[:7]
+            print("  ── CONFIGURATION " + "─" * (W - 18))
+            print(f"  🔐  Env vars      : {', '.join(shown)}{'...' if len(context.env_vars) > 7 else ''}")
+            print()
+
+        print("=" * W + "\n")
+
+    def _setup_gitops_repo(self, project_path: str, repo_url: str) -> None:
+        """Initialize GitOps repo structure using gitpython (no shell execution)."""
+        from pathlib import Path
+        from src.utils.errors import ConfigError
+
+        _SAFE_REPO_RE = re.compile(
+            r'^(https://(github\.com|gitlab\.com|bitbucket\.org)'
+            r'/[\w.\-]+/[\w.\-]+(\.git)?'
+            r'|git@(github\.com|gitlab\.com):[\w.\-]+/[\w.\-]+(\.git)?)$'
+        )
+
+        gitops_dir = Path(project_path) / "gitops-repo"
+
         if repo_url and (repo_url.startswith("http") or repo_url.startswith("git@")):
-            if not os.path.exists(gitops_dir):
-                print(f"🌐 Cloning remote GitOps repository: {repo_url}...")
-                try:
-                    subprocess.run(["git", "clone", repo_url, gitops_dir], check=True, capture_output=True)
-                except subprocess.CalledProcessError as e:
-                    logger.error(f"Failed to clone GitOps repo: {e.stderr.decode()}")
-                    # Fallback to local init if clone fails
-            else:
-                print(f"🔄 Pulling latest changes from GitOps repository...")
-                try:
-                    subprocess.run(["git", "-C", gitops_dir, "pull"], check=True, capture_output=True)
-                except Exception as e:
-                    logger.warning(f"Failed to pull GitOps repo updates: {e}")
-
-        # 2. Local Initialization & Structure
-        if not os.path.exists(gitops_dir):
-            print(f"✨ Creating GitOps structural tree in {gitops_dir}...")
-            os.makedirs(os.path.join(gitops_dir, "argocd"), exist_ok=True)
-            os.makedirs(os.path.join(gitops_dir, "namespaces"), exist_ok=True)
-            
-            # Init as git repo if it's not one
+            if not _SAFE_REPO_RE.match(repo_url):
+                raise ConfigError(
+                    f"Rejected unsafe repo URL: {repo_url!r}. "
+                    "Only github.com, gitlab.com, bitbucket.org HTTPS/SSH URLs allowed."
+                )
             try:
-                subprocess.run(["git", "init", gitops_dir], check=True, capture_output=True)
-            except Exception: pass
+                from git import Repo
+                if not gitops_dir.exists():
+                    logger.info("Cloning GitOps repo: %s", repo_url)
+                    Repo.clone_from(repo_url, str(gitops_dir), depth=1)
+                else:
+                    logger.info("Pulling latest from GitOps repo")
+                    Repo(str(gitops_dir)).remotes.origin.pull()
+            except ImportError:
+                raise ConfigError("gitpython required: pip install gitpython>=3.1.40")
+            except Exception as e:
+                logger.error("GitOps repo operation failed: %s", e)
 
-            # Minimal README/Structure
-            readme_content = (
-                "# GitOps Repository\n"
-                "Managed by UrbanOps Agent v1.0.0\n\n"
-                "## Directory Layout\n"
-                "- `argocd/applicationset.yaml`: The master App-of-Apps generator mapping to `apps/*`.\n"
-                "- `namespaces/`: Contains the isolated `<svc_name>.yaml` Namespace declarations.\n"
-                "- `apps/<svc_name>/`: Contains the specific `deployment.yaml`, `service.yaml`, and `hpa.yaml` definitions per service.\n"
+        if not gitops_dir.exists():
+            (gitops_dir / "argocd").mkdir(parents=True, exist_ok=True)
+            (gitops_dir / "namespaces").mkdir(parents=True, exist_ok=True)
+            (gitops_dir / "README.md").write_text(
+                "# GitOps Repository\nManaged by devops-agent\n\n"
+                "## Layout\n- `argocd/`: ApplicationSet manifests\n"
+                "- `namespaces/`: Namespace declarations\n"
+                "- `apps/<svc>/`: Per-service manifests\n"
             )
-            with open(os.path.join(gitops_dir, "README.md"), "w") as f:
-                f.write(readme_content)
-        
-        # Ensure standard folders exist
-        os.makedirs(os.path.join(gitops_dir, "argocd"), exist_ok=True)
-        os.makedirs(os.path.join(gitops_dir, "namespaces"), exist_ok=True)
-
-
+        else:
+            (gitops_dir / "argocd").mkdir(exist_ok=True)
+            (gitops_dir / "namespaces").mkdir(exist_ok=True)

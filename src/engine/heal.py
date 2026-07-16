@@ -1,9 +1,11 @@
 from src.engine.models import GeneratedFile
-from src.engine.llm import call_llm
+from src.llm_clients.nvidia_client import NvidiaClient
+
 
 class Healer:
-    def __init__(self):
-        self.prompt = self._load_prompt("configs/prompts/debug/healer.md")
+    def __init__(self, client: NvidiaClient | None = None) -> None:
+        self._client = client or NvidiaClient()
+        self._system_prompt = self._load_prompt("configs/prompts/debug/healer.md")
 
     def _load_prompt(self, filepath: str) -> str:
         try:
@@ -16,24 +18,23 @@ class Healer:
         print(f"🚑 Healing {file.path}...")
         error_str = "\n".join(errors)
 
-        full_prompt = f"""
-You are a Senior Patch Engineer.
-Fix the broken file based on the validation errors provided.
+        user_prompt = (
+            "You are a Senior Patch Engineer.\n"
+            "Fix the broken file based on the validation errors provided.\n\n"
+            "RULES:\n"
+            "- Minimal changes only.\n"
+            "- Preserve existing formatting/style.\n"
+            "- Return the ENTIRE file as raw text.\n"
+            "- NO markdown blocks. NO backticks. NO explanations.\n\n"
+            f"BROKEN FILE:\n{file.content}\n\n"
+            f"VALIDATION ERRORS:\n{error_str}\n"
+        )
 
-RULES:
-- Minimal changes only.
-- Preserve existing formatting/style.
-- Return the ENTIRE file as raw text.
-- NO markdown blocks. NO backticks. NO explanations.
-
-BROKEN FILE:
-{file.content}
-
-VALIDATION ERRORS:
-{error_str}
-"""
-        # Uses heal-optimised routing: Gemini → Groq → Cerebras
-        response = call_llm(self.prompt, full_prompt, task_type="heal")
+        response = self._client.call(
+            user_prompt,
+            system_prompt=self._system_prompt,
+            temperature=0.1,
+        )
 
         healed_content = response.strip()
         if healed_content.startswith("```"):

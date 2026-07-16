@@ -18,7 +18,7 @@ Register a new user account.
 ```json
 {
   "email": "user@example.com",
-  "password": "secret123"
+  "password": "<password>"
 }
 ```
 **Response:** `201 Created`

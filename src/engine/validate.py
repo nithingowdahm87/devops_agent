@@ -1,6 +1,19 @@
+import json
+import logging
 import os
 import yaml
 import subprocess
+
+try:
+    from jsonschema import validate as json_validate
+    JSONSCHEMA_AVAILABLE = True
+except ImportError:
+    JSONSCHEMA_AVAILABLE = False
+
+from src.engine.models import GeneratedFile, ValidationResult
+
+logger = logging.getLogger("devops-agent")
+
 
 def run_cmd(cmd: list) -> tuple:
     try:
@@ -8,7 +21,6 @@ def run_cmd(cmd: list) -> tuple:
         return res.returncode, res.stdout, res.stderr
     except Exception as e:
         return 1, "", str(e)
-from src.engine.models import GeneratedFile, ValidationResult
 
 
 class Validator:
@@ -58,8 +70,9 @@ class Validator:
         return None
 
     def _get_tool_path(self, tool_name: str) -> str:
-        local_tool = os.path.join(self.bin_path, tool_name)
-        return local_tool if os.path.exists(local_tool) else tool_name
+        safe_name = os.path.basename(tool_name)
+        local_tool = os.path.join(self.bin_path, safe_name)
+        return local_tool if os.path.exists(local_tool) else safe_name
 
     def _basic_structural_check(self, file: GeneratedFile) -> list:
         errors = []
@@ -84,15 +97,16 @@ class Validator:
         tmp_path = f"/tmp/hadolint_{os.getpid()}"
         with open(tmp_path, "w") as f:
             f.write(file.content)
-
-        hadolint = self._get_tool_path("hadolint")
-        code, out, err = run_cmd([hadolint, tmp_path])
-        if code != 0:
-            if "No such file or directory" in err or "not found" in err:
-                print(f"⚠️  hadolint not found at {hadolint}. Skipping.")
-            else:
-                errors.append(f"HADOLINT ERROR:\n{out or err}")
-        os.remove(tmp_path)
+        try:
+            hadolint = self._get_tool_path("hadolint")
+            code, out, err = run_cmd([hadolint, tmp_path])
+            if code != 0:
+                if "No such file or directory" in err or "not found" in err:
+                    print(f"⚠️  hadolint not found at {hadolint}. Skipping.")
+                else:
+                    errors.append(f"HADOLINT ERROR:\n{out or err}")
+        finally:
+            os.remove(tmp_path)
         return errors
 
     def _validate_dockerignore(self, file: GeneratedFile) -> list:
@@ -110,75 +124,69 @@ class Validator:
         tmp_path = f"/tmp/k8s_{os.getpid()}.yaml"
         with open(tmp_path, "w") as f:
             f.write(file.content)
-
-        kubeconform = self._get_tool_path("kubeconform")
-        code, out, err = run_cmd([kubeconform, "-strict", tmp_path])
-        if code != 0:
-            if "No such file or directory" in err or "not found" in err:
-                print(f"⚠️  kubeconform not found. Skipping strict schema validation.")
-            else:
-                errors.append(f"KUBECONFORM ERROR:\n{out or err}")
-
-        # internal schema validation for Argo and GitOps
         try:
-            import json
-            from jsonschema import validate as json_validate
-            docs = list(yaml.safe_load_all(file.content))
-            for doc in docs:
-                if not doc: continue
-                schema_name = None
-                kind = doc.get("kind")
+            kubeconform = self._get_tool_path("kubeconform")
+            code, out, err = run_cmd([kubeconform, "-strict", tmp_path])
+            if code != 0:
+                if "No such file or directory" in err or "not found" in err:
+                    print(f"⚠️  kubeconform not found. Skipping strict schema validation.")
+                else:
+                    errors.append(f"KUBECONFORM ERROR:\n{out or err}")
 
-                # Check path & kind for ArgoCD
-                if kind == "ApplicationSet" or "argocd/applicationset.yaml" in file.path.lower():
-                    schema_name = "argocd-appset.schema.json"
-                elif kind == "Application":
-                    schema_name = "argocd-app.schema.json"
+            # internal schema validation for Argo and GitOps
+            if JSONSCHEMA_AVAILABLE:
+                try:
+                    docs = list(yaml.safe_load_all(file.content))
+                    for doc in docs:
+                        if not doc:
+                            continue
+                        schema_name = None
+                        kind = doc.get("kind")
+                        if kind == "ApplicationSet" or "argocd/applicationset.yaml" in file.path.lower():
+                            schema_name = "argocd-appset.schema.json"
+                        elif kind == "Application":
+                            schema_name = "argocd-app.schema.json"
+                        if schema_name:
+                            schema_path = os.path.join(self.project_root, "configs", "schemas", schema_name)
+                            if os.path.exists(schema_path):
+                                with open(schema_path, "r") as sf:
+                                    schema = json.load(sf)
+                                try:
+                                    json_validate(instance=doc, schema=schema)
+                                except Exception as ve:
+                                    errors.append(f"Argo {kind or 'GitOps'} Schema Violation: {str(ve)}")
+                except Exception as e:
+                    logger.warning("Internal Argo validation failed: %s", e)
 
-                if schema_name:
-                    schema_path = os.path.join(self.project_root, "configs", "schemas", schema_name)
-                    if os.path.exists(schema_path):
-                        with open(schema_path, "r") as sf:
-                            schema = json.load(sf)
-                        try:
-                            json_validate(instance=doc, schema=schema)
-                        except Exception as ve:
-                            errors.append(f"Argo {kind or 'GitOps'} Schema Violation: {str(ve)}")
-        except ImportError:
-            pass # jsonschema not installed
-        except Exception as e:
-            logger.warning(f"Internal Argo validation failed: {e}")
-
-        try:
-            docs = list(yaml.safe_load_all(file.content))
-            for doc in docs:
-                if not doc:
-                    continue
-                kind = doc.get("kind")
-                if kind == "Deployment":
-                    spec = doc.get("spec", {})
-                    if spec.get("replicas", 0) < 2:
-                        print("⚠️  Deployment replicas < 2 (acceptable for dev)")
-                    sc = spec.get("template", {}).get("spec", {}).get("securityContext", {})
-                    if sc.get("runAsNonRoot") is not True:
-                        print("⚠️  Pod securityContext.runAsNonRoot not set (recommended for prod)")
-
-                if kind == "HorizontalPodAutoscaler":
-                    hpa_spec = doc.get("spec", {})
-                    if "scaleTargetRef" not in hpa_spec:
-                        errors.append(
-                            f"HPA '{doc.get('metadata', {}).get('name', '?')}' "
-                            "missing spec.scaleTargetRef."
-                        )
-                    if "selector" in hpa_spec:
-                        errors.append(
-                            f"HPA '{doc.get('metadata', {}).get('name', '?')}' "
-                            "has invalid 'selector' in spec root — use scaleTargetRef instead."
-                        )
-        except Exception as e:
-            errors.append(f"YAML PARSE ERROR: {str(e)}")
-
-        os.remove(tmp_path)
+            try:
+                docs = list(yaml.safe_load_all(file.content))
+                for doc in docs:
+                    if not doc:
+                        continue
+                    kind = doc.get("kind")
+                    if kind == "Deployment":
+                        spec = doc.get("spec", {})
+                        if spec.get("replicas", 0) < 2:
+                            print("⚠️  Deployment replicas < 2 (acceptable for dev)")
+                        sc = spec.get("template", {}).get("spec", {}).get("securityContext", {})
+                        if sc.get("runAsNonRoot") is not True:
+                            print("⚠️  Pod securityContext.runAsNonRoot not set (recommended for prod)")
+                    if kind == "HorizontalPodAutoscaler":
+                        hpa_spec = doc.get("spec", {})
+                        if "scaleTargetRef" not in hpa_spec:
+                            errors.append(
+                                f"HPA '{doc.get('metadata', {}).get('name', '?')}' "
+                                "missing spec.scaleTargetRef."
+                            )
+                        if "selector" in hpa_spec:
+                            errors.append(
+                                f"HPA '{doc.get('metadata', {}).get('name', '?')}' "
+                                "has invalid 'selector' in spec root — use scaleTargetRef instead."
+                            )
+            except Exception as e:
+                errors.append(f"YAML PARSE ERROR: {str(e)}")
+        finally:
+            os.remove(tmp_path)
         return errors
 
     def _validate_compose(self, file: GeneratedFile) -> list:
@@ -210,23 +218,18 @@ class Validator:
                 errors.append("GitHub Actions workflow is empty.")
                 return errors
 
-            # Optional JSON schema validation (keeps it aligned with configs/schemas/github-actions.schema.json)
-            import json
-            from jsonschema import validate as json_validate  # type: ignore[import]
-
-            schema_path = os.path.join(
-                self.project_root,
-                "configs",
-                "schemas",
-                "github-actions.schema.json",
-            )
-            if os.path.exists(schema_path):
-                with open(schema_path, "r") as sf:
-                    schema = json.load(sf)
-                try:
-                    json_validate(instance=workflow, schema=schema)
-                except Exception as ve:
-                    errors.append(f"GHA Schema Violation: {str(ve)}")
+            # Optional JSON schema validation
+            if JSONSCHEMA_AVAILABLE:
+                schema_path = os.path.join(
+                    self.project_root, "configs", "schemas", "github-actions.schema.json",
+                )
+                if os.path.exists(schema_path):
+                    with open(schema_path, "r") as sf:
+                        schema = json.load(sf)
+                    try:
+                        json_validate(instance=workflow, schema=schema)
+                    except Exception as ve:
+                        errors.append(f"GHA Schema Violation: {str(ve)}")
 
             # Lightweight structural checks
             jobs = workflow.get("jobs", {})

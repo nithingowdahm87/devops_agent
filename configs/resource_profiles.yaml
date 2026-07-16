@@ -1,0 +1,97 @@
+# configs/resource_profiles.yaml
+# Tunable by platform teams without touching orchestrator code.
+# Keys must match svc_type strings in orchestrator._isolate_context().
+environments:
+  dev:
+    node-express:
+      cpu_req: "100m"
+      cpu_lim: "500m"
+      mem_req: "128Mi"
+      mem_lim: "512Mi"
+      replicas: 1
+    python-fastapi:
+      cpu_req: "200m"
+      cpu_lim: "1"
+      mem_req: "256Mi"
+      mem_lim: "1Gi"
+      replicas: 1
+    java-spring-boot:
+      cpu_req: "500m"
+      cpu_lim: "2"
+      mem_req: "512Mi"
+      mem_lim: "2Gi"
+      replicas: 1
+    react-nginx:
+      cpu_req: "50m"
+      cpu_lim: "200m"
+      mem_req: "64Mi"
+      mem_lim: "256Mi"
+      replicas: 1
+    default:
+      cpu_req: "100m"
+      cpu_lim: "500m"
+      mem_req: "128Mi"
+      mem_lim: "512Mi"
+      replicas: 1
+  staging:
+    node-express:
+      cpu_req: "200m"
+      cpu_lim: "1"
+      mem_req: "256Mi"
+      mem_lim: "1Gi"
+      replicas: 2
+    python-fastapi:
+      cpu_req: "300m"
+      cpu_lim: "2"
+      mem_req: "512Mi"
+      mem_lim: "2Gi"
+      replicas: 2
+    java-spring-boot:
+      cpu_req: "750m"
+      cpu_lim: "3"
+      mem_req: "1Gi"
+      mem_lim: "3Gi"
+      replicas: 2
+    react-nginx:
+      cpu_req: "100m"
+      cpu_lim: "500m"
+      mem_req: "128Mi"
+      mem_lim: "512Mi"
+      replicas: 2
+    default:
+      cpu_req: "200m"
+      cpu_lim: "1"
+      mem_req: "256Mi"
+      mem_lim: "1Gi"
+      replicas: 2
+  prod:
+    node-express:
+      cpu_req: "250m"
+      cpu_lim: "2"
+      mem_req: "512Mi"
+      mem_lim: "2Gi"
+      replicas: 3
+    python-fastapi:
+      cpu_req: "500m"
+      cpu_lim: "4"
+      mem_req: "1Gi"
+      mem_lim: "4Gi"
+      replicas: 3
+    java-spring-boot:
+      cpu_req: "1"
+      cpu_lim: "4"
+      mem_req: "2Gi"
+      mem_lim: "4Gi"
+      replicas: 3
+    react-nginx:
+      cpu_req: "100m"
+      cpu_lim: "500m"
+      mem_req: "256Mi"
+      mem_lim: "1Gi"
+      replicas: 3
+    default:
+      cpu_req: "250m"
+      cpu_lim: "2"
+      mem_req: "512Mi"
+      mem_lim: "2Gi"
+      replicas: 3

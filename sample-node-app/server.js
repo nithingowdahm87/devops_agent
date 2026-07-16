@@ -10,11 +10,19 @@ const PORT = process.env.PORT || 3000;
 
 let server;
 
+const authenticate = (req, res, next) => {
+  const apiKey = req.headers['x-api-key'];
+  if (!apiKey || apiKey !== process.env.API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+};
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.get('/api/users', (req, res) => {
+app.get('/api/users', authenticate, (req, res) => {
   res.json([{ id: 1, name: 'Alice' }]);
 });
 

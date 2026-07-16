@@ -22,7 +22,7 @@ def test_planner():
     ctx = ProjectContext(
         project_name="test-project",
         language="python",
-        framework="fastapi",
+        frameworks=["fastapi"],
         dependencies=["fastapi", "uvicorn", "redis", "sqlalchemy", "psycopg2"],
         ports=["8000"]
     )

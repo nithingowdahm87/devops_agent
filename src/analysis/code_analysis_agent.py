@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger("devops-agent")
@@ -14,8 +15,11 @@ class CodeAnalysisAgent:
     to .devops_context.json for all subsequent agents to use.
     """
     def __init__(self, project_path: str):
-        self.project_path = project_path
-        self.cache_file = os.path.join(project_path, ".devops_context.json")
+        self.project_path = os.path.realpath(os.path.abspath(project_path))
+        cache_file = os.path.realpath(os.path.join(self.project_path, ".devops_context.json"))
+        if not cache_file.startswith(self.project_path + os.sep) and cache_file != self.project_path:
+            raise ValueError(f"Path traversal detected: {cache_file}")
+        self.cache_file = cache_file
     
     def analyze(self) -> ProjectContext:
         print(f"🕵️  Code Analysis Agent: Scanning {self.project_path}...")
@@ -38,8 +42,14 @@ class CodeAnalysisAgent:
         
         # 3. specific heuristics
         self._detect_node(analysis)
-        self._detect_static_html(analysis)
         self._detect_python(analysis)
+        self._detect_go(analysis)
+        self._detect_dotnet(analysis)
+        self._detect_elixir(analysis)
+        self._detect_php(analysis)
+        self._detect_ruby(analysis)
+        self._detect_rust(analysis)
+        self._detect_static_html(analysis)
         self._detect_ports(analysis)
         self._detect_env_vars(analysis)
         self._detect_existing_files(analysis)
@@ -100,16 +110,110 @@ class CodeAnalysisAgent:
         analysis["dependencies"] = list(set(analysis["dependencies"]))
         analysis["frameworks"] = list(set(analysis["frameworks"]))
 
+    def _detect_go(self, analysis: dict):
+        for root, dirs, files in os.walk(self.project_path):
+            dirs[:] = [d for d in dirs if d not in ("vendor", ".git")]
+            if "go.mod" in files:
+                analysis["language"] = "go"
+                try:
+                    content = read_file(os.path.join(root, "go.mod"))
+                    m = re.search(r'^module\s+(\S+)', content, re.MULTILINE)
+                    if m and m.group(1) not in analysis["dependencies"]:
+                        analysis["dependencies"].append(m.group(1))
+                    gv = re.search(r'^go\s+([\d.]+)', content, re.MULTILINE)
+                    if gv:
+                        analysis.setdefault("runtime_version", gv.group(1))
+                except (FileNotFoundError, PermissionError, OSError) as e:
+                    logger.debug("Skip go.mod: %s", e)
+                return
+
+    def _detect_dotnet(self, analysis: dict):
+        for root, dirs, files in os.walk(self.project_path):
+            dirs[:] = [d for d in dirs if d not in (".git", "bin", "obj")]
+            for f in files:
+                if f.endswith(".csproj") or f.endswith(".fsproj") or f.endswith(".vbproj"):
+                    analysis["language"] = "dotnet"
+                    analysis["frameworks"].append("ASP.NET Core")
+                    try:
+                        content = read_file(os.path.join(root, f))
+                        m = re.search(r'<TargetFramework>net([\d.]+)', content)
+                        if m:
+                            analysis.setdefault("runtime_version", m.group(1))
+                    except (FileNotFoundError, PermissionError, OSError) as e:
+                        logger.debug("Skip .csproj: %s", e)
+                    return
+
+    def _detect_elixir(self, analysis: dict):
+        for root, dirs, files in os.walk(self.project_path):
+            dirs[:] = [d for d in dirs if d not in (".git", "_build", "deps")]
+            if "mix.exs" in files:
+                analysis["language"] = "elixir"
+                analysis["frameworks"].append("Phoenix")
+                return
+
+    def _detect_php(self, analysis: dict):
+        for root, dirs, files in os.walk(self.project_path):
+            dirs[:] = [d for d in dirs if d not in (".git", "vendor")]
+            if "composer.json" in files:
+                analysis["language"] = "php"
+                try:
+                    data = json.loads(read_file(os.path.join(root, "composer.json")))
+                    reqs = data.get("require", {})
+                    if "laravel/framework" in reqs:
+                        analysis["frameworks"].append("Laravel")
+                    elif "symfony/symfony" in reqs or any("symfony" in k for k in reqs):
+                        analysis["frameworks"].append("Symfony")
+                    analysis["dependencies"].extend(list(reqs.keys())[:10])
+                except (FileNotFoundError, PermissionError, OSError, json.JSONDecodeError) as e:
+                    logger.debug("Skip composer.json: %s", e)
+                return
+
+    def _detect_ruby(self, analysis: dict):
+        for root, dirs, files in os.walk(self.project_path):
+            dirs[:] = [d for d in dirs if d not in (".git",)]
+            if "Gemfile" in files:
+                analysis["language"] = "ruby"
+                try:
+                    content = read_file(os.path.join(root, "Gemfile")).lower()
+                    if "rails" in content:
+                        analysis["frameworks"].append("Rails")
+                    elif "sinatra" in content:
+                        analysis["frameworks"].append("Sinatra")
+                    elif "roda" in content:
+                        analysis["frameworks"].append("Roda")
+                except (FileNotFoundError, PermissionError, OSError) as e:
+                    logger.debug("Skip Gemfile: %s", e)
+                return
+
+    def _detect_rust(self, analysis: dict):
+        for root, dirs, files in os.walk(self.project_path):
+            dirs[:] = [d for d in dirs if d not in (".git", "target")]
+            if "Cargo.toml" in files:
+                analysis["language"] = "rust"
+                try:
+                    content = read_file(os.path.join(root, "Cargo.toml"))
+                    if "actix-web" in content:
+                        analysis["frameworks"].append("Actix-web")
+                    elif "axum" in content:
+                        analysis["frameworks"].append("Axum")
+                    elif "rocket" in content:
+                        analysis["frameworks"].append("Rocket")
+                    m = re.search(r'edition\s*=\s*"(\d+)"', content)
+                    if m:
+                        analysis.setdefault("runtime_version", m.group(1))
+                except (FileNotFoundError, PermissionError, OSError) as e:
+                    logger.debug("Skip Cargo.toml: %s", e)
+                return
+
     def _detect_static_html(self, analysis: dict):
-        """Detect static HTML projects (index.html without real JS frameworks)."""
+        """Only mark as static HTML if no real language was detected."""
         if analysis["language"] != "unknown":
-            return  # Already detected as Node.js or Python, skip
+            return
 
         for root, dirs, files in os.walk(self.project_path):
             if "node_modules" in dirs:
                 dirs.remove("node_modules")
-
-            if "index.html" in files:
+            if "index.html" in files and root == self.project_path:
                 analysis["language"] = "html"
                 analysis["frameworks"] = []
                 return
@@ -140,7 +244,6 @@ class CodeAnalysisAgent:
 
     def _detect_ports(self, analysis: dict):
         # Naive scan for common port patterns
-        import re
         full_text = analysis["raw_context_summary"] 
         likely_files = ["server.js", "app.py", "main.py", "index.js", "docker-compose.yml"]
         
@@ -168,7 +271,6 @@ class CodeAnalysisAgent:
             analysis["ports"].append("8000")
 
     def _detect_env_vars(self, analysis: dict):
-        import re
         likely_files = ["server.js", "app.py", "main.py", "config.js", "settings.py"]
         files_to_scan = []
         for root, _, files in os.walk(self.project_path):
@@ -221,7 +323,6 @@ class CodeAnalysisAgent:
 
     def _detect_architecture(self, analysis: dict):
         """Detects architectural patterns, per-service details, categorized and annotated databases."""
-        import re
         arch = set()
 
         # ─── Comprehensive Database Detection Maps ──────────────────────
@@ -434,6 +535,108 @@ class CodeAnalysisAgent:
                         "role": "Microservice", "databases": [],
                     }
 
+            # ── Go service ────────────────────────────────────────────
+            elif "go.mod" in files and is_subdir:
+                microservice_dirs.append(rel_dir)
+                try:
+                    content = read_file(os.path.join(root, "go.mod"))
+                    gv = re.search(r'^go\s+([\d.]+)', content, re.MULTILINE)
+                    go_ver = gv.group(1) if gv else "1.22"
+                    svc_ports = ["8080"]
+                    for fname in os.listdir(root):
+                        if fname.endswith(".go"):
+                            fc = read_file(os.path.join(root, fname))
+                            pm = re.findall(r'(?:Listen|Addr).*:(\d{4,5})', fc)
+                            if pm: svc_ports = pm[:1]
+                    microservice_details[rel_dir] = {
+                        "path": rel_dir, "language": "Go", "frameworks": [],
+                        "runtime_version": go_ver, "base_image": f"golang:{go_ver}-alpine → alpine:3.19",
+                        "ports": svc_ports, "key_deps": [], "role": "Go API Service", "databases": [],
+                    }
+                except (FileNotFoundError, PermissionError, OSError) as e:
+                    logger.debug("Skip Go service: %s", e)
+                    microservice_details[rel_dir] = {
+                        "path": rel_dir, "language": "Go", "frameworks": [], "ports": ["8080"],
+                        "base_image": "golang:1.22-alpine", "runtime_version": "1.22",
+                        "role": "Go API Service", "databases": [],
+                    }
+
+            # ── .NET service ──────────────────────────────────────────
+            elif any(f.endswith((".csproj", ".fsproj")) for f in files) and is_subdir:
+                microservice_dirs.append(rel_dir)
+                csproj = next((f for f in files if f.endswith((".csproj", ".fsproj"))), None)
+                dotnet_ver = "8.0"
+                if csproj:
+                    try:
+                        c = read_file(os.path.join(root, csproj))
+                        m = re.search(r'<TargetFramework>net([\d.]+)', c)
+                        if m: dotnet_ver = m.group(1)
+                    except (FileNotFoundError, PermissionError, OSError) as e:
+                        logger.debug("Skip .NET csproj: %s", e)
+                microservice_details[rel_dir] = {
+                    "path": rel_dir, "language": "C#", "frameworks": ["ASP.NET Core"],
+                    "runtime_version": dotnet_ver, "base_image": f"mcr.microsoft.com/dotnet/sdk:{dotnet_ver} → mcr.microsoft.com/dotnet/aspnet:{dotnet_ver}",
+                    "ports": ["8080"], "key_deps": [], "role": ".NET API Service", "databases": [],
+                }
+
+            # ── Elixir/Phoenix service ────────────────────────────────
+            elif "mix.exs" in files and is_subdir:
+                microservice_dirs.append(rel_dir)
+                microservice_details[rel_dir] = {
+                    "path": rel_dir, "language": "Elixir", "frameworks": ["Phoenix"],
+                    "runtime_version": "1.16", "base_image": "hexpm/elixir:1.16.0-erlang-26.2.1-alpine-3.18.4",
+                    "ports": ["4000"], "key_deps": [], "role": "Elixir Phoenix API", "databases": [],
+                }
+
+            # ── PHP/Laravel service ───────────────────────────────────
+            elif "composer.json" in files and is_subdir:
+                microservice_dirs.append(rel_dir)
+                framework = "Laravel"
+                try:
+                    data = json.loads(read_file(os.path.join(root, "composer.json")))
+                    reqs = data.get("require", {})
+                    if "symfony/symfony" in reqs or any("symfony" in k for k in reqs):
+                        framework = "Symfony"
+                except (FileNotFoundError, PermissionError, OSError, json.JSONDecodeError) as e:
+                    logger.debug("Skip PHP composer.json: %s", e)
+                microservice_details[rel_dir] = {
+                    "path": rel_dir, "language": "PHP", "frameworks": [framework],
+                    "runtime_version": "8.3", "base_image": "php:8.3-fpm-alpine",
+                    "ports": ["9000"], "key_deps": [], "role": f"PHP {framework} API", "databases": [],
+                }
+
+            # ── Ruby service ──────────────────────────────────────────
+            elif "Gemfile" in files and is_subdir:
+                microservice_dirs.append(rel_dir)
+                framework = "Sinatra"
+                try:
+                    content = read_file(os.path.join(root, "Gemfile")).lower()
+                    if "rails" in content: framework = "Rails"
+                    elif "roda" in content: framework = "Roda"
+                except (FileNotFoundError, PermissionError, OSError) as e:
+                    logger.debug("Skip Ruby Gemfile: %s", e)
+                microservice_details[rel_dir] = {
+                    "path": rel_dir, "language": "Ruby", "frameworks": [framework],
+                    "runtime_version": "3.3", "base_image": "ruby:3.3-alpine",
+                    "ports": ["4567"], "key_deps": [], "role": f"Ruby {framework} API", "databases": [],
+                }
+
+            # ── Rust service ──────────────────────────────────────────
+            elif "Cargo.toml" in files and is_subdir:
+                microservice_dirs.append(rel_dir)
+                framework = "Actix-web"
+                try:
+                    content = read_file(os.path.join(root, "Cargo.toml"))
+                    if "axum" in content: framework = "Axum"
+                    elif "rocket" in content: framework = "Rocket"
+                except (FileNotFoundError, PermissionError, OSError) as e:
+                    logger.debug("Skip Rust Cargo.toml: %s", e)
+                microservice_details[rel_dir] = {
+                    "path": rel_dir, "language": "Rust", "frameworks": [framework],
+                    "runtime_version": "1.78", "base_image": "rust:1.78-alpine → alpine:3.19",
+                    "ports": ["8080"], "key_deps": [], "role": f"Rust {framework} API", "databases": [],
+                }
+
             # ── Java/Spring Boot service ─────────────────────────────
             elif "pom.xml" in files and is_subdir:
                 # Ensure it's a leaf service (contains src/main)
@@ -486,6 +689,10 @@ class CodeAnalysisAgent:
             arch.add("microservices")
             analysis["microservice_dirs"]    = microservice_dirs
             analysis["microservice_details"] = microservice_details
+            # Infer top-level language from first detected service if still unknown
+            if analysis.get("language", "unknown") == "unknown" and microservice_details:
+                first = next(iter(microservice_details.values()))
+                analysis["language"] = first.get("language", "unknown").lower()
         else:
             arch.add("monolith")
 

@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 try:
     from jinja2 import Environment, SandboxedEnvironment, meta, select_autoescape
+    from jinja2 import TemplateSyntaxError as JinjaTemplateSyntaxError
     JINJA2_AVAILABLE = True
 except ImportError:
     JINJA2_AVAILABLE = False
@@ -75,7 +76,11 @@ class PromptRenderer:
     """
 
     def __init__(self, prompts_root: Optional[str] = None):
-        self.prompts_root = Path(prompts_root or "configs/prompts")
+        self.prompts_root = Path(
+            prompts_root
+            or os.environ.get("PROMPTS_ROOT")
+            or "configs/prompts"
+        )
 
         if JINJA2_AVAILABLE:
             # Sandboxed environment - no arbitrary Python execution
@@ -107,7 +112,11 @@ class PromptRenderer:
         Raises:
             PromptTemplateError: If template file not found
         """
-        prompt_path = self.prompts_root / stage / f"{role}.md"
+        safe_stage = Path(stage).name
+        safe_role = Path(role).name
+        prompt_path = (self.prompts_root / safe_stage / f"{safe_role}.md").resolve()
+        if not str(prompt_path).startswith(str(self.prompts_root.resolve())):
+            raise PromptTemplateError(f"Path traversal detected: {prompt_path}")
         if not prompt_path.exists():
             raise PromptTemplateError(f"Prompt not found: {prompt_path}")
         return prompt_path.read_text(encoding="utf-8")
@@ -211,7 +220,7 @@ class PromptRenderer:
             try:
                 ast = self.env.parse(template)
                 return list(meta.find_undeclared_variables(ast))
-            except Exception:
+            except JinjaTemplateSyntaxError:
                 pass
 
         # Fallback: regex-based extraction
@@ -228,10 +237,11 @@ _renderer: Optional[PromptRenderer] = None
 
 
 def get_renderer() -> PromptRenderer:
-    """Get or create global prompt renderer."""
+    """Get or create global prompt renderer. Respects PROMPTS_ROOT env var."""
     global _renderer
-    if _renderer is None:
-        _renderer = PromptRenderer()
+    current_root = os.environ.get("PROMPTS_ROOT", "configs/prompts")
+    if _renderer is None or str(_renderer.prompts_root) != current_root:
+        _renderer = PromptRenderer(current_root)
     return _renderer
 
 
